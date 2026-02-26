@@ -16,6 +16,7 @@ from app.infrastructure.storage import STORAGE_CONN
 from app.infrastructure.vector_store import VECTOR_STORE_CONN
 from app.infrastructure.redis import REDIS_CONN
 from app.utils.auth.jwt_middleware import jwt_middleware
+from app.agents.sessions.api import router as sessions_router
 
 
 # 创建FastAPI应用
@@ -42,6 +43,8 @@ setup_logging()
 # 注册所有路由器
 #==================================
 #app.include_router(llms_router, prefix="/api/v1", tags=["模型管理"])
+app.include_router(sessions_router, prefix="/api/v1", tags=["Agent 会话管理"])
+
 
 #==================================
 # 配置中间件

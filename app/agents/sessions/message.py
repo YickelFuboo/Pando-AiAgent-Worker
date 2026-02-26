@@ -12,7 +12,6 @@ class Role(str, Enum):
     ASSISTANT = "assistant"
     TOOL = "tool"
 
-
 class Function(BaseModel):
     name: str
     arguments: str
@@ -23,15 +22,16 @@ class Function(BaseModel):
         if isinstance(arguments, (dict, list)):
             arguments = json.dumps(arguments)
         elif isinstance(arguments, str):
+            # 如果已经是字符串，尝试解析并重新序列化以确保格式正确
             try:
                 arguments = json.dumps(json.loads(arguments), ensure_ascii=False)
             except json.JSONDecodeError:
+                # 如果不是有效的 JSON 字符串，直接序列化
                 arguments = json.dumps(arguments, ensure_ascii=False)
         return {
             "name": self.name,
             "arguments": arguments
         }
-
 
 class ToolCall(BaseModel):
     """助手发起的单次工具调用（assistant 消息中）。"""
@@ -47,45 +47,29 @@ class ToolCall(BaseModel):
             "function": self.function.model_dump()
         }
 
-
-class ToolResult(BaseModel):
-    """工具执行结果标识（tool 消息用），与 tool_calls[].id 对应。"""
-    name: str = Field(..., description="工具名")
-    tool_call_id: str = Field(..., description="对应 assistant 消息里 tool_calls[].id")
-
-
 class Message(BaseModel):
     """聊天消息，兼容 OpenAI 风格。按用途分三种形态：
 
     - 普通消息：role + content（system/user/assistant 的普通回复）
-    - 助手工具调用：role=assistant + tool_calls（可选 content）
-    - 工具执行结果：role=tool + tool_result + content
+    - 助手工具调用：role="assistant" + tool_calls（可选 content）
+    - 工具执行结果：role="tool" + tool_result + content
     """
     role: Role
     content: str = ""
 
+    # 模型返回的工具调用信息记录
     tool_calls: Optional[List[ToolCall]] = Field(default=None, description="助手发起的工具调用列表，仅 role=assistant 时使用")
-    tool_result: Optional[ToolResult] = Field(default=None, description="工具执行结果标识，仅 role=tool 时使用")
-    
-    create_time: Optional[datetime] = Field(default=None)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _dict_to_tool_result(cls, data: Any) -> Any:
-        """反序列化时：将 name + tool_call_id 转为 tool_result，保持与旧 JSON/API 兼容。"""
-        if not isinstance(data, dict):
-            return data
-        data = dict(data)
-        name = data.pop("name", None)
-        tool_call_id = data.pop("tool_call_id", None)
-        if name is not None and tool_call_id is not None:
-            data["tool_result"] = {"name": name, "tool_call_id": tool_call_id}
-        return data
+    # 工具执行结果信息
+    name: Optional[str] = Field(default=None, description="工具名")
+    tool_call_id: Optional[str] = Field(default=None, description="对应 assistant 消息里 tool_calls[].id")
+
+    create_time: Optional[datetime] = Field(default=None)
 
     @property
     def is_tool_result(self) -> bool:
         """是否为工具执行结果消息（role=tool 且带 tool_result）。"""
-        return self.role == Role.TOOL and self.tool_result is not None
+        return self.role == Role.TOOL and self.name is not None and self.tool_call_id is not None
 
     @property
     def is_assistant_tool_calls(self) -> bool:
@@ -99,9 +83,9 @@ class Message(BaseModel):
             message["content"] = self.content
         if self.tool_calls is not None:
             message["tool_calls"] = [tool_call.model_dump() for tool_call in self.tool_calls]
-        if self.tool_result is not None:
-            message["name"] = self.tool_result.name
-            message["tool_call_id"] = self.tool_result.tool_call_id
+        if self.name is not None and self.tool_call_id is not None:
+            message["name"] = self.name
+            message["tool_call_id"] = self.tool_call_id
         if self.create_time:
             message["create_time"] = self.create_time.strftime("%Y-%m-%d %H:%M:%S")
         return message
@@ -113,23 +97,28 @@ class Message(BaseModel):
     def to_user_message(self) -> Dict[str, Any]:
         """将消息转换易于用户阅读的消息格式"""
         message = {'role': self.role.value}
+
+        # 添加内容
         content = ""
         if self.tool_calls:
             if self.content:
                 content = self.content
                 content += "\n\n"
-            content += "## 执行工具\n"
+            # 添加toolcall信息
+            content += "  执行工具：\n"
             for index, tool_call in enumerate(self.tool_calls):
-                content += f"### {index+1}. {tool_call.function.name}\n"
-                content += "参数：\n"
+                content += f"    {index+1}. {tool_call.function.name}\n"
+                content += "      参数：\n"
                 args_dict = json.loads(tool_call.function.arguments)
                 formatted_json = json.dumps(args_dict, ensure_ascii=False, indent=2)
                 content += f"```json\n{formatted_json}\n```\n\n"
-        elif self.tool_result:
-            content = f"### 工具{self.tool_result.name}执行结果：\n\n{self.content}"
+        elif self.name and self.tool_call_id:
+            content = f"  工具{self.name}执行结果：\n\n{self.content}"
         else:
             content = self.content
         message['content'] = content
+
+        # 添加创建时间
         if self.create_time:
             message['create_time'] = self.create_time.strftime("%Y-%m-%d %H:%M:%S")
         return message
@@ -150,7 +139,7 @@ class Message(BaseModel):
         return cls(role="assistant", content=content, create_time=datetime.now())
 
     @classmethod
-    def tool_calls_message(cls, content: Union[str, List[str]] = "", tool_calls: Optional[List[ToolCall]] = None, **kwargs) -> "Message":
+    def tool_call_message(cls, content: Union[str, List[str]] = "", tool_calls: Optional[List[ToolCall]] = None, **kwargs) -> "Message":
         """创建带工具调用的助手消息。"""
         formatted_calls = [
             {"id": call.id, "type": call.type, "function": call.function.model_dump()}
@@ -166,6 +155,7 @@ class Message(BaseModel):
         return cls(
             role="tool",
             content=content,
-            tool_result=ToolResult(name=name, tool_call_id=tool_call_id),
+            name=name,
+            tool_call_id=tool_call_id,
             create_time=datetime.now(),
         )

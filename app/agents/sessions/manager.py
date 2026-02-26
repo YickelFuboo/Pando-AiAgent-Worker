@@ -6,6 +6,7 @@ import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Dict, Optional, Any
+from sqlalchemy import delete, select
 from .message import Message
 from .models import SessionRecord
 from .session import Session
@@ -115,14 +116,20 @@ def _row_to_session(row) -> Session:
     meta = getattr(row, "metadata_", None)
     if meta is None or not isinstance(meta, dict):
         meta = {}
+    llm_provider = getattr(row, "llm_provider", None) or ""
+    last_consolidated = getattr(row, "last_consolidated", 0) or 0
+    memory = getattr(row, "memory", None) or ""
     return Session(
         session_id=row.session_id,
         description=row.description,
         session_type=row.session_type,
         user_id=row.user_id,
+        llm_provider=llm_provider,
         llm_name=row.llm_name or "default",
         messages=messages,
         metadata=meta,
+        last_consolidated=last_consolidated,
+        memory=memory,
         created_at=row.created_at,
         last_updated=row.last_updated,
     )
@@ -132,7 +139,6 @@ class DatabaseSessionStore(SessionStore):
     """数据库存储：单表 agent_sessions，使用 get_db() 获取 session。"""
 
     async def get(self, session_id: str) -> Optional[Session]:
-        from sqlalchemy import select
         async for db in get_db():
             r = (
                 await db.execute(
@@ -145,7 +151,6 @@ class DatabaseSessionStore(SessionStore):
         return None
 
     async def save(self, session: Session) -> None:
-        from sqlalchemy import select
         messages_json = [msg.model_dump() for msg in session.messages]
         async for db in get_db():
             try:
@@ -159,9 +164,12 @@ class DatabaseSessionStore(SessionStore):
                     rec.description = session.description
                     rec.session_type = session.session_type
                     rec.user_id = session.user_id
+                    rec.llm_provider = session.llm_provider or ""
                     rec.llm_name = session.llm_name
-                    rec.messages = messages_json
                     rec.metadata_ = session.metadata
+                    rec.messages = messages_json
+                    rec.last_consolidated = session.last_consolidated
+                    rec.memory = session.memory or ""
                     rec.last_updated = session.last_updated
                 else:
                     db.add(SessionRecord(
@@ -169,9 +177,12 @@ class DatabaseSessionStore(SessionStore):
                         description=session.description,
                         session_type=session.session_type,
                         user_id=session.user_id,
+                        llm_provider=session.llm_provider or "",
                         llm_name=session.llm_name,
-                        messages=messages_json,
                         metadata_=session.metadata,
+                        messages=messages_json,
+                        last_consolidated=session.last_consolidated,
+                        memory=session.memory or "",
                         created_at=session.created_at,
                         last_updated=session.last_updated,
                     ))
@@ -184,7 +195,6 @@ class DatabaseSessionStore(SessionStore):
             break
 
     async def delete(self, session_id: str) -> bool:
-        from sqlalchemy import delete
         async for db in get_db():
             try:
                 r = await db.execute(delete(SessionRecord).where(SessionRecord.session_id == session_id))
@@ -198,7 +208,6 @@ class DatabaseSessionStore(SessionStore):
         return False
 
     async def get_all(self) -> List[Session]:
-        from sqlalchemy import select
         result: List[Session] = []
         async for db in get_db():
             rows = (await db.execute(select(SessionRecord))).scalars().all()
@@ -227,6 +236,7 @@ class SessionManager:
         user_id: str = "anonymous",
         description: str = "",
         metadata: Optional[Dict[str, Any]] = None,
+        llm_provider: Optional[str] = None,
         llm_name: Optional[str] = None
     ) -> str:
         """创建新会话。DB 由 Store 内部管理，不由 API 注入。"""
@@ -238,7 +248,8 @@ class SessionManager:
             user_id=user_id,
             description=description,
             session_type=session_type,
-            llm_name=llm_name or "default",
+            llm_provider=llm_provider or "",
+            llm_name=llm_name or "",
         )
         if metadata:
             for key, value in metadata.items():
@@ -318,8 +329,7 @@ class SessionManager:
             logging.warning("Cannot clear history: session not found: %s", session_id)
             return False
         try:
-            session.messages.clear()
-            session.last_updated = datetime.now()
+            session.clear()
             await self._store.save(session)
             logging.info("Cleared history for session: %s", session_id)
             return True
@@ -328,4 +338,4 @@ class SessionManager:
             return False
 
 
-session_manager = SessionManager()
+SESSION_MANAGER = SessionManager()
