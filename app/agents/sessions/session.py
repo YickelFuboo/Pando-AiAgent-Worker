@@ -46,18 +46,15 @@ class Session(BaseModel):
         self.messages.append(message)
         self.last_updated = datetime.now()
 
-    def get_history_for_context(self, max_messages: int = 500) -> List[Dict[str, Any]]:
+    def get_messages(self) -> List[Message]:
+        """返回会话消息列表。"""
+        return self.messages
+
+    def get_context(self, max_messages: int = 500) -> List[Dict[str, Any]]:
         """返回未合并到压缩结果的消息，按照用户回合对齐。"""
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
-
-        # 丢弃前面的非用户消息，避免孤立的 tool_result 块
-        #for i, m in enumerate[Message](sliced):
-        #    if m.get("role") == "user":
-        #        sliced = sliced[i:]
-        #        break
-
-        return [s.model_dump() for s in sliced]        
+        return [s.to_context() for s in sliced]
 
     def clear(self) -> None:
         """清空会话历史。"""

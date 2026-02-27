@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     # =============================================================================
 
     # =============================================================================
+    # Web搜索配置 - Web Search
+    # =============================================================================
+    # Tavily搜索API配置
+    tavily_api_key: str = Field(default="", description="Tavily搜索API密钥", env="TAVILY_API_KEY")
+    brave_api_key: str = Field(default="", description="Brave搜索API密钥", env="BRAVE_API_KEY")
+
+    # =============================================================================
     # Agent配置 - Agent 会话存储
     # =============================================================================
     agent_session_use_local_storage: bool = Field(default=False, description="为 True 时会话存本地文件，为 False 时存数据库", env="AGENT_SESSION_USE_LOCAL_STORAGE")

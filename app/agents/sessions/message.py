@@ -90,6 +90,18 @@ class Message(BaseModel):
             message["create_time"] = self.create_time.strftime("%Y-%m-%d %H:%M:%S")
         return message
 
+    def to_context(self) -> Dict[str, Any]:
+        """提供给 LLM API 的消息格式，不包含 create_time。"""
+        message = {"role": self.role.value}
+        if self.content is not None:
+            message["content"] = self.content
+        if self.tool_calls is not None:
+            message["tool_calls"] = [tc.model_dump() for tc in self.tool_calls]
+        if self.name is not None and self.tool_call_id is not None:
+            message["name"] = self.name
+            message["tool_call_id"] = self.tool_call_id
+        return message
+
     def to_json(self) -> str:
         """将消息转换为JSON字符串"""
         return json.dumps(self.model_dump(), ensure_ascii=False)

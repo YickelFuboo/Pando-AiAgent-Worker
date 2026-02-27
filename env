@@ -120,9 +120,21 @@ OS_PASSWORD=admin
 
 # ========================模型配置说明 见：app/config/xxx.json========================
 
+# =============================================================================
+# Web搜索配置 - Web Search
+# =============================================================================
+# Tavily搜索API配置（Agent/ RAG 联网搜索，免费额度约 1000 次/月）
+TAVILY_API_KEY=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
+# Brave搜索API配置（web_search 工具，需在 https://api.search.brave.com 申请，有免费额度）
+BRAVE_API_KEY=
 
 # ========================Agent配置========================
 # 会话存储方式：true=本地文件，false=数据库
 AGENT_SESSION_USE_LOCAL_STORAGE=false
 # 本地会话文件目录（仅当 AGENT_SESSION_USE_LOCAL_STORAGE=true 时生效）
 AGENT_SESSION_STORAGE_DIR=data/sessions
+
+# 记忆存储方式：true=本地文件，false=数据库
+AGENT_MEMORY_USE_LOCAL_STORAGE=false
+# 本地记忆文件目录（仅当 AGENT_MEMORY_USE_LOCAL_STORAGE=true 时生效）
+AGENT_MEMORY_STORAGE_DIR=data/memory
