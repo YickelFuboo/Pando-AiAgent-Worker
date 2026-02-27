@@ -12,14 +12,17 @@ class ToolsFactory:
     def get_tool(self, name: str) -> BaseTool:
         return self._tools.get(name)
 
-    def add_tool(self, tool: BaseTool) -> None:
+    def has_tool(self, name: str) -> bool:
+        return name in self._tools
+
+    def register_tool(self, tool: BaseTool) -> None:
         self._tools[tool.name] = tool
 
-    def add_tools(self, *tools: BaseTool) -> None:
+    def register_tools(self, *tools: BaseTool) -> None:
         for tool in tools:
-            self.add_tool(tool)
+            self.register_tool(tool)
 
-    def remove_tool(self, name: str) -> None:
+    def unregister_tool(self, name: str) -> None:
         self._tools.pop(name)
 
     def to_params(self) -> List[Dict[str, Any]]:
@@ -34,6 +37,7 @@ class ToolsFactory:
             if not tool:
                 return ToolErrorResult(f"Tool {tool_name} not found")
 
+            # 检查参数是否有缺失
             required = set(tool.parameters.get("required", []) or [])
             provided = set(tool_params.keys())
             missing = required - provided
@@ -42,6 +46,7 @@ class ToolsFactory:
                 logger.error(msg)
                 return ToolErrorResult(msg)
 
+            # 检查参数是否合法
             if hasattr(tool, "validate_params"):
                 try:
                     errors = tool.validate_params(tool_params)  # type: ignore[attr-defined]
