@@ -16,8 +16,9 @@ from app.infrastructure.storage import STORAGE_CONN
 from app.infrastructure.vector_store import VECTOR_STORE_CONN
 from app.infrastructure.redis import REDIS_CONN
 from app.utils.auth.jwt_middleware import jwt_middleware
+from app.agents.bus.queues import MESSAGE_BUS
+from app.channel.websocket.websocket import router as websocket_router
 from app.agents.sessions.api import router as sessions_router
-from app.agents.bus.queues import MessageBus
 
 
 # 创建FastAPI应用
@@ -45,6 +46,7 @@ setup_logging()
 #==================================
 #app.include_router(llms_router, prefix="/api/v1", tags=["模型管理"])
 app.include_router(sessions_router, prefix="/api/v1", tags=["Agent 会话管理"])
+app.include_router(websocket_router, prefix="/api/v1", tags=["WebSocket"])
 
 
 #==================================
@@ -83,9 +85,7 @@ async def startup_event():
     try:
         logging.info("开始应用启动流程...")
 
-        message_bus = MessageBus()
-        app.state.message_bus = message_bus
-        app.state.message_bus_task = asyncio.create_task(message_bus.run())
+        app.state.message_bus_task = asyncio.create_task(MESSAGE_BUS.run())
         logging.info("MessageBus 已在后台运行")
 
         logging.info(f"{APP_NAME} v{APP_VERSION} 启动成功")

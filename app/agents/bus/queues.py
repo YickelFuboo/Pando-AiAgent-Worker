@@ -2,17 +2,20 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict
-
-from app.agents.core.react_agent import ReActAgent
+from app.agents.core.react import ReActAgent
 
 
 @dataclass
 class InboundMessage:
     """Message received from a chat channel."""
-    channel: str  # telegram, discord, slack, whatsapp
+    channel_type: str  # telegram, discord, slack, whatsapp
+    channel_id: str  # Channel identifier
     user_id: str  # User identifier
     session_id: str  # Session identifier
+    agent_type: str
     content: str  # Message text
+    llm_provider: str = ""
+    llm_model: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
@@ -20,7 +23,8 @@ class InboundMessage:
 @dataclass
 class OutboundMessage:
     """Message to send to a chat channel."""
-    channel: str
+    channel_type: str
+    channel_id: str
     user_id: str
     session_id: str
     content: str
@@ -29,7 +33,7 @@ class OutboundMessage:
 
 
 ChannelOutboundCallback = Callable[[OutboundMessage], None]
-CHANNEL_OUTBOUND_CALLBACKS = Dict[str, ChannelOutboundCallback]
+CHANNEL_OUTBOUND_CALLBACKS: Dict[str, ChannelOutboundCallback] = {}
 
 class MessageBus:
     def __init__(self):
@@ -79,7 +83,7 @@ class MessageBus:
 
             outbound_msg = await self.pop_outbound()
             if outbound_msg:
-                callback = CHANNEL_OUTBOUND_CALLBACKS.get(outbound_msg.channel)
+                callback = CHANNEL_OUTBOUND_CALLBACKS.get(outbound_msg.channel_type)
                 if callback:
                     callback(outbound_msg)
 
@@ -88,14 +92,24 @@ class MessageBus:
         agent = ReActAgent(
             name="ReActAgent", 
             description="A ReAct agent", 
+            channel_type=inbound_msg.channel_type,
+            channel_id=inbound_msg.channel_id,
             session_id=inbound_msg.session_id, 
             workspace=inbound_msg.session_id
         )
+
+        # 运行Agent
         result = await agent.run(inbound_msg.content)
+
+        # 发送最终相应消息
         outbound_msg = OutboundMessage(
-            channel=inbound_msg.channel,
+            channel_type=inbound_msg.channel_type,
+            channel_id=inbound_msg.channel_id,
             user_id=inbound_msg.user_id,
             session_id=inbound_msg.session_id,
             content=result,
         )
         await self.push_outbound(outbound_msg)
+
+
+MESSAGE_BUS = MessageBus()

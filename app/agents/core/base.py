@@ -13,6 +13,7 @@ from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
 from app.agents.skills.manager import SkillsManager
+from app.agents.bus.queues import MESSAGE_BUS, OutboundMessage
 
 
 class AgentState(str, Enum):
@@ -38,6 +39,8 @@ class BaseAgent(BaseModel, ABC):
     description: str = Field(..., description="Agent description")
     
     # 会话信息
+    channel_type: str = Field(..., description="Channel type")
+    channel_id: str = Field(..., description="Channel ID")
     session_id: str = Field(..., description="Current session ID")
 
     # Agent类型
@@ -81,6 +84,8 @@ class BaseAgent(BaseModel, ABC):
         self,
         name: str,
         description: str,
+        channel_type: str,
+        channel_id: str,
         session_id: str,
         agent_type: str,
         workspace_index: str,
@@ -99,6 +104,8 @@ class BaseAgent(BaseModel, ABC):
      
         self.name=name,
         self.description=description,
+        self.channel_type=channel_type,
+        self.channel_id=channel_id,
         self.session_id=session_id,
         self.agent_type=agent_type,
         self.workspace_index=workspace_index,
@@ -111,7 +118,7 @@ class BaseAgent(BaseModel, ABC):
         self.llm_name=llm_name,
         self.temperature=temperature,
         self.max_tokens=max_tokens,
-        
+
         self.memory_window=memory_window,
         self.max_steps=max_steps,
         self.max_duplicate_steps=max_duplicate_steps,
@@ -205,6 +212,13 @@ class BaseAgent(BaseModel, ABC):
         """Notify user"""
         message = message.to_user_message()
         #发送给用户
+        await MESSAGE_BUS.push_outbound(OutboundMessage(
+            channel_type=self.channel_type,
+            channel_id=self.channel_id,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            content=message,
+        ))
 
     async def push_history_message_and_notify_user(self, session_id: str, message: Message):
         """Add message to session and push user"""
