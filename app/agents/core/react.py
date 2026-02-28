@@ -28,10 +28,11 @@ class ReActAgent(BaseAgent):
         name: str,
         description: str,
         session_id: str,
-        workspace: str,
+        agent_type: str,
+        workspace_index: str,
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
-        next_step_prompt: Optional[str] = "Please continue your work.",
+        next_step_prompt: Optional[str] = None,
         llm_provider: Optional[str] = None,
         llm_name: Optional[str] = None,
         temperature: float = 0.7,
@@ -47,7 +48,8 @@ class ReActAgent(BaseAgent):
             name=name,
             description=description,
             session_id=session_id,
-            workspace=workspace,
+            agent_type=agent_type,
+            workspace_index=workspace_index,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             next_step_prompt=next_step_prompt,
@@ -116,6 +118,14 @@ class ReActAgent(BaseAgent):
         try:
             # 获取模型实例
             llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_name)
+
+            # 更新历史记录
+            await self.push_history_message(self.session_id, Message.user_message(question))
+            
+            # 构建系统提示词和用户提示词，仅当返回有效值时才覆盖默认值
+            self.system_prompt = await self.context_builder.build_system_prompt() or self.system_prompt
+            question = await self.context_builder.build_user_content(question)
+
             # 设置运行状态
             self.state = AgentState.RUNNING
             logging.info(f"Agent state set to RUNNING")
@@ -123,9 +133,6 @@ class ReActAgent(BaseAgent):
             while (self.current_step < self.max_steps and self.state != AgentState.FINISHED):
                 self.current_step += 1
                 logging.info(f"Executing step {self.current_step}/{self.max_steps}")
-
-                # 更新历史记录
-                await self.push_history_message(self.session_id, Message.user_message(question))
 
                 # 模型思考和工具调度
                 content, tool_calls = await self.think(llm, question)

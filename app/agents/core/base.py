@@ -102,24 +102,27 @@ class BaseAgent(BaseModel, ABC):
         self.session_id=session_id,
         self.agent_type=agent_type,
         self.workspace_index=workspace_index,
-        self.system_prompt=system_prompt,
-        self.user_prompt=user_prompt,
-        self.next_step_prompt=next_step_prompt,
+
+        self.system_prompt=system_prompt or "You are pando, a helpful assistant.",
+        self.user_prompt=user_prompt or "",
+        self.next_step_prompt=next_step_prompt or "Please continue your work.",
+
         self.llm_provider=llm_provider,
         self.llm_name=llm_name,
         self.temperature=temperature,
         self.max_tokens=max_tokens,
+        
         self.memory_window=memory_window,
         self.max_steps=max_steps,
         self.max_duplicate_steps=max_duplicate_steps,
         self.kwargs=kwargs,
 
-        self.agent_path = AGENT_DIR / self.agent_type
-        self.workspace_path = WORKSPACE_DIR / self.workspace_index
-
-        self.context_builder = ContextBuilder(self.agent_path, self.workspace_path, self.kwargs)
-        self.memory_manager = MemoryManager(self.session_id, self.agent_path, self.workspace_path)
-        self.skills_manager = SkillsManager(self.agent_path, self.workspace_path)
+        # 当前Agent路径和当前工作空间路径
+        cur_agent_path = str(AGENT_DIR / self.agent_type)
+        cur_workspace_path = str(WORKSPACE_DIR / self.workspace_index)
+        self.context_builder = ContextBuilder(self.session_id, cur_agent_path, cur_workspace_path, self.kwargs)
+        self.memory_manager = MemoryManager(self.session_id, cur_agent_path, cur_workspace_path)
+        self.skills_manager = SkillsManager(cur_agent_path, cur_workspace_path)
 
 
     def reset(self):

@@ -91,21 +91,21 @@ _SAVE_MEMORY_TOOL = [
 class MemoryManager:
     """记忆管理器：实现三层记忆（会话/工作空间/Agent 类型）。"""
 
-    def __init__(self, session: Session, agent_path: str, workspace_path: str) -> None:
+    def __init__(self, session: Session, cur_agent_path: str, cur_workspace_path: str) -> None:
         self._session = session
-        self._agent_memory = Path(agent_path) / "memory" / "MEMORY.md"  
-        self._agent_history = Path(agent_path) / "memory" / "HISTORY.md"
-        self._workspace_memory = Path(workspace_path) / "memory" / "MEMORY.md"
-        self._workspace_history = Path(workspace_path) / "memory" / "HISTORY.md"
+        self._agent_memory = Path(cur_agent_path) / "memory" / "MEMORY.md"  
+        self._agent_history = Path(cur_agent_path) / "memory" / "HISTORY.md"
+        self._workspace_memory = Path(cur_workspace_path) / "memory" / "MEMORY.md"
+        self._workspace_history = Path(cur_workspace_path) / "memory" / "HISTORY.md"
 
-    async def _read_file(self, path: Path) -> str:
-        if not path.exists():
+    async def _read_file(self, file: Path) -> str:
+        if not file.exists():
             return ""
-        return await asyncio.to_thread(path.read_text, encoding="utf-8")
+        return await asyncio.to_thread(file.read_text, encoding="utf-8")
 
-    async def _write_file(self, path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(path.write_text, content, encoding="utf-8")
+    async def _write_file(self, file: Path, content: str) -> None:
+        file.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(file.write_text, content, encoding="utf-8")
 
     @staticmethod
     def _messages_to_lines(messages: List[Message]) -> List[str]:
