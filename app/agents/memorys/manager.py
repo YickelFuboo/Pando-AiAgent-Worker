@@ -1,8 +1,12 @@
-"""记忆管理器：按配置选用存储，提供会话级与按 key 的记忆提取接口。
+"""记忆管理器：三层记忆
 
-通过 LLM 工具调用将内容压缩到长时记忆与历史日志。会话级、用户级提供预设 Prompt；
-Agent 类型任务级、项目级由各业务自定义 MemoryExtractPrompt。
+1) 会话记忆：写入 Session.memory（仅对当前会话生效）
+2) 工作空间记忆：写入 app/agents/.workspace/<workspace_index>/memory.md（同一代码仓/工作空间多会话共享）
+3) Agent 类型记忆：写入 app/agents/.agent/<agent_type>/memory.md（沉淀该类 Agent 成功/失败的公共经验）
+
+工作空间记忆与 Agent 类型记忆均使用 memory.md 文件存储。
 """
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -11,9 +15,7 @@ from pydantic import BaseModel, Field
 from app.agents.sessions.message import Message
 from app.agents.sessions.session import Session
 from app.agents.sessions.manager import SESSION_MANAGER
-from app.config.settings import settings
 from app.infrastructure.llms.chat_models.factory import llm_factory
-from .store import MemoryStore, LocalFileMemoryStore, DatabaseMemoryStore
 
 
 class MemoryExtractPrompt(BaseModel):
@@ -35,20 +37,28 @@ Note: Extract only key information and conclusions from this session for continu
         )
 
     @classmethod
-    def for_user_task(cls) -> "MemoryExtractPrompt":
-        """用户+本类任务预设：仅提炼该用户在本类任务下的偏好/习惯。"""
+    def for_workspace(cls) -> "MemoryExtractPrompt":
+        """工作空间级预设：提炼该工作空间下通用约定/偏好/关键结论，供后续会话复用。"""
         return cls(
-            system_prompt="""You are an expert at extracting user preferences and habits for the current task type.
-Extract only preferences, habits, and recurring expressions that this user has shown in conversations relevant to the current task type, for reuse in the same user's same task type.
-Based on "Current User-Task Memory" and "Content to Process" below, call save_memory to persist.
+            system_prompt="""You are an expert at consolidating workspace-level memory for a software project.
+Based on the "Current Workspace Memory" and "Content to Process" below, distill durable project conventions, decisions, constraints, and recurring patterns that should be reused across sessions in the same workspace.
+Call the save_memory tool to persist.
 
-Note: Do not include information unrelated to the current task type or overly broad personal information.""",
-            user_instruction="Read the \"Current User-Task Memory\" and \"Content to Process\" sections below, extract preferences and habits relevant to this user and task type, and call save_memory to persist.",
+Note: Extract only information applicable to this workspace. Avoid user-specific or session-only details.""",
+            user_instruction="Read the \"Current Workspace Memory\" and \"Content to Process\" sections below, distill durable workspace-level memory, and call save_memory to persist.",
         )
 
+    @classmethod
+    def for_agent(cls) -> "MemoryExtractPrompt":
+        """Agent 类型级预设：沉淀该类 Agent 在同类任务中的成功/失败经验与可复用策略。"""
+        return cls(
+            system_prompt="""You are an expert at consolidating agent-type memory.
+Based on the "Current Agent-Type Memory" and "Content to Process" below, extract reusable strategies, pitfalls, and best practices that improve success rate for this agent type across tasks.
+Call the save_memory tool to persist.
 
-_DEFAULT_SESSION_EXTRACT_PROMPT = MemoryExtractPrompt.for_session()
-_DEFAULT_USER_TASK_EXTRACT_PROMPT = MemoryExtractPrompt.for_user_task()
+Note: Focus on generalizable experience for this agent type. Avoid workspace-specific details unless broadly applicable.""",
+            user_instruction="Read the \"Current Agent-Type Memory\" and \"Content to Process\" sections below, distill reusable agent-type experience, and call save_memory to persist.",
+        )
 
 
 _SAVE_MEMORY_TOOL = [
@@ -79,14 +89,23 @@ _SAVE_MEMORY_TOOL = [
 
 
 class MemoryManager:
-    """记忆管理器：按配置选用本地文件或数据库存储。"""
+    """记忆管理器：实现三层记忆（会话/工作空间/Agent 类型）。"""
 
-    def __init__(self) -> None:
-        self._store: MemoryStore = (
-            LocalFileMemoryStore()
-            if settings.agent_memory_use_local_storage
-            else DatabaseMemoryStore()
-        )
+    def __init__(self, session: Session, agent_path: str, workspace_path: str) -> None:
+        self._session = session
+        self._agent_memory = Path(agent_path) / "memory" / "MEMORY.md"  
+        self._agent_history = Path(agent_path) / "memory" / "HISTORY.md"
+        self._workspace_memory = Path(workspace_path) / "memory" / "MEMORY.md"
+        self._workspace_history = Path(workspace_path) / "memory" / "HISTORY.md"
+
+    async def _read_file(self, path: Path) -> str:
+        if not path.exists():
+            return ""
+        return await asyncio.to_thread(path.read_text, encoding="utf-8")
+
+    async def _write_file(self, path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(path.write_text, content, encoding="utf-8")
 
     @staticmethod
     def _messages_to_lines(messages: List[Message]) -> List[str]:
@@ -151,103 +170,92 @@ class MemoryManager:
 
     async def _consolidate_session_memory(
         self,
-        session: Session,
         content: str,
         llm_provider: str,
         llm_name: str,
     ) -> None:
-        """会话记忆合并：提炼到 session.memory。"""
-        current = session.memory or ""
-        user_content = f"## Current Session Memory\n{current or '(empty)'}{content}"
-        user_question = f"{_DEFAULT_SESSION_EXTRACT_PROMPT.user_instruction}\n\n{user_content}"
+        """会话记忆合并：提炼到 session.memory。content 为待处理消息行（不含标题），此处拼上「## Content to Process」。"""
+        current_memory = self._session.memory or ""
+        user_content = f"## Current Session Memory\n{current_memory or '(empty)'}\n\n## Content to Process\n{content}"
+        user_question = f"{MemoryExtractPrompt.for_session().user_instruction}\n\n{user_content}"
 
         memory_update, _ = await self._extract(
-            system_prompt=_DEFAULT_SESSION_EXTRACT_PROMPT.system_prompt,
+            system_prompt=MemoryExtractPrompt.for_session().system_prompt,
             user_question=user_question,
             llm_provider=llm_provider,
             llm_name=llm_name,
         )
         if memory_update is not None:
-            session.memory = memory_update
-            await SESSION_MANAGER.save_session(session.session_id)
+            self._session.memory = memory_update
+            await SESSION_MANAGER.save_session(self._session.session_id)
 
-    async def _consolidate_user_task_memory(
+    async def _consolidate_workspace_memory(
         self,
-        session: Session,
         content: str,
         llm_provider: str,
         llm_name: str,
     ) -> None:
-        """用户+本类任务记忆合并：提炼到 store 的 user_task:{user_id}:{session_type}。"""
-        memory_key = f"user_task:{session.user_id}:{session.session_type}"
+        """工作空间记忆合并：提炼到 .workspace/<workspace_index>/memory.md。"""
+        current_memory = await self._read_file(self._workspace_memory)
+        user_content = f"## Current Workspace Memory\n{current_memory or '(empty)'}\n\n## Content to Process\n{content}"
+        user_question = f"{MemoryExtractPrompt.for_workspace().user_instruction}\n\n{user_content}"
 
-        current = await self._store.read_memory(memory_key)
-        user_content = f"## Current User-Task Memory\n{current or '(empty)'}{content}"
-        user_question = f"{_DEFAULT_USER_TASK_EXTRACT_PROMPT.user_instruction}\n\n{user_content}"
-        
         memory_update, history_entry = await self._extract(
-            system_prompt=_DEFAULT_USER_TASK_EXTRACT_PROMPT.system_prompt,
+            system_prompt=MemoryExtractPrompt.for_workspace().system_prompt,
             user_question=user_question,
             llm_provider=llm_provider,
             llm_name=llm_name,
         )
+        if memory_update is not None and memory_update != current_memory:
+            await self._write_file(self._workspace_memory, memory_update)
         if history_entry is not None:
-            await self._store.append_history(memory_key, history_entry)
-        if memory_update is not None and memory_update != current:
-            await self._store.write_memory(memory_key, memory_update)
+            await self._write_file(self._workspace_history, history_entry)
 
-    async def _consolidate_key_memory(
+    async def _consolidate_agent_type_memory(
         self,
-        memory_key: str,
-        prompt: MemoryExtractPrompt,
         content: str,
         llm_provider: str,
         llm_name: str,
     ) -> None:
-        """按 key 记忆合并：提炼到 store 的指定 memory_key。"""
-        current = await self._store.read_memory(memory_key)
-        user_content = f"## Current Long-term Memory\n{current or '(empty)'}{content}"
-        user_question = f"{prompt.user_instruction}\n\n{user_content}"
+        """Agent 类型记忆合并：提炼到 .agent/<agent_type>/memory.md。"""
+        current_memory = await self._read_file(self._agent_memory)
+        user_content = f"## Current Agent-Type Memory\n{current_memory or '(empty)'}\n\n## Content to Process\n{content}"
+        user_question = f"{MemoryExtractPrompt.for_agent().user_instruction}\n\n{user_content}"
 
         memory_update, history_entry = await self._extract(
-            system_prompt=prompt.system_prompt,
+            system_prompt=MemoryExtractPrompt.for_agent().system_prompt,
             user_question=user_question,
             llm_provider=llm_provider,
             llm_name=llm_name,
         )
+        if memory_update is not None and memory_update != current_memory:
+            await self._write_file(self._agent_memory, memory_update)
         if history_entry is not None:
-            await self._store.append_history(memory_key, history_entry)
-        if memory_update is not None and memory_update != current:
-            await self._store.write_memory(memory_key, memory_update)
+            await self._write_file(self._agent_history, history_entry)
 
     async def consolidate_memory(
         self,
-        session: Session,
-        workspace: Path,
         llm_provider: str = "",
         llm_name: str = "",
         *,
         archive_all: bool = False,
         memory_window: int = 50,
         with_session_memory: bool = True,
-        with_user_task_memory: bool = True,
-        key_prompts: Optional[List[Tuple[str, MemoryExtractPrompt]]] = None,
+        with_workspace_memory: bool = True,
+        with_agent_type_memory: bool = True,
     ) -> bool:
-        """记忆合并入口：基于 last_consolidated 取待处理消息，依次执行会话/用户任务/业务 key 记忆提取，最后统一更新 last_consolidated 并持久化会话。
-
-        key_prompts: 业务侧传入 [(memory_key, MemoryExtractPrompt), ...]，如 [("project:123", prompt)]，差异保留在业务侧。
-        """
+        """记忆合并入口：基于 last_consolidated 取待处理消息，依次执行会话/工作空间/Agent 类型三层记忆提取，最后统一更新 last_consolidated 并持久化会话。"""
         if archive_all:
-            old_messages = session.messages
+            old_messages = self._session.messages
             keep_count = 0
         else:
             keep_count = max(0, memory_window // 2)
-            if len(session.messages) <= keep_count:
+            if len(self._session.messages) <= keep_count:
                 return True
-            if len(session.messages) - session.last_consolidated <= 0:
+            if len(self._session.messages) - self._session.last_consolidated <= 0:
                 return True
-            old_messages = session.messages[
-                session.last_consolidated : -keep_count if keep_count else len(session.messages)
+            old_messages = self._session.messages[
+                self._session.last_consolidated : -keep_count if keep_count else len(self._session.messages)
             ]
         # 如果没有需要合并的消息，则直接返回
         if not old_messages:
@@ -263,47 +271,56 @@ class MemoryManager:
         lines = self._messages_to_lines(old_messages)
         if not lines:
             return True
-        content = f"\n## Content to Process\n{chr(10).join(lines)}"
+        content = "\n".join(lines)
         
-        provider = llm_provider or getattr(session, "llm_provider", "") or ""
-        model = llm_name or getattr(session, "llm_name", "") or ""
+        provider = llm_provider or getattr(self._session, "llm_provider", "") or ""
+        model = llm_name or getattr(self._session, "llm_name", "") or ""
         if with_session_memory:
-            await self._consolidate_session_memory(session, content, provider, model)
-        if with_user_task_memory:
-            await self._consolidate_user_task_memory(session, content, provider, model)
-        for memory_key, prompt in key_prompts or []:
-            await self._consolidate_key_memory(memory_key, prompt, content, provider, model)
+            await self._consolidate_session_memory(content, provider, model)
+        if with_workspace_memory:
+            await self._consolidate_workspace_memory(content, provider, model)
+        if with_agent_type_memory:
+            await self._consolidate_agent_type_memory(content, provider, model)
 
-        session.last_consolidated = (
-            len(session.messages) if archive_all else (len(session.messages) - keep_count)
+        # 更新会话的 last_consolidated 并持久化会话
+        self._session.last_consolidated = (
+            len(self._session.messages) if archive_all else (len(self._session.messages) - keep_count)
         )
-        await SESSION_MANAGER.save_session(session.session_id)
+        await SESSION_MANAGER.save_session(self._session.session_id)
 
         logging.info(
             "Memory consolidation done: last_consolidated=%s",
-            session.last_consolidated,
+            self._session.last_consolidated,
         )
         return True
 
-    def append_session_memory_context(self, session: Session) -> str:
+    def append_session_memory_context(self) -> str:
         """将会话记忆拼成可追加到 Prompt 的 Markdown 片段（来自 session.memory）。"""
-        if not (session.memory or "").strip():
+        if not (self._session.memory or "").strip():
             return ""
-        return f"## 会话记忆\n{session.memory.strip()}\n"
+        return f"## current session memory\n{self._session.memory.strip()}\n"
 
-    async def append_user_task_memory_context(self, user_id: str, task_type: str) -> str:
-        """将用户+本类任务记忆拼成可追加到 Prompt 的 Markdown 片段（store 的 user_task:{user_id}:{task_type}）。"""
-        memory_key = f"user_task:{user_id}:{task_type}"
-        content = await self._store.read_memory(memory_key)
+    async def append_workspace_memory_context(self) -> str:
+        """将工作空间记忆拼成可追加到 Prompt 的 Markdown 片段（来自 .workspace/<workspace_index>/memory.md）。"""
+        content = await self._read_file(self._workspace_memory)
         if not (content or "").strip():
             return ""
-        return f"## 用户本类任务记忆\n{content.strip()}\n"
+        return f"## current workspace memory\n{content.strip()}\n"
 
-    async def append_key_memory_context(self, memory_key: str) -> str:
-        """将指定 key 的记忆拼成可追加到 Prompt 的 Markdown 片段（来自 store）。"""
-        content = await self._store.read_memory(memory_key)
+    async def append_agent_type_memory_context(self) -> str:
+        """将 Agent 类型记忆拼成可追加到 Prompt 的 Markdown 片段（来自 .agent/<agent_type>/memory.md）。"""
+        content = await self._read_file(self._agent_memory)
         if not (content or "").strip():
             return ""
-        return f"## Long-term Memory ({memory_key})\n{content.strip()}\n"
+        return f"## current agent type memory\n{content.strip()}\n"
 
-MEMORY_MANAGER = MemoryManager()
+    async def append_all_memory_context(
+        self,
+    ) -> str:
+        """组合三层记忆上下文（会话/工作空间/Agent 类型），供上层一次性拼接到 prompt。"""
+        parts = [
+            self.append_session_memory_context(),
+            await self.append_workspace_memory_context(),
+            await self.append_agent_type_memory_context(),
+        ]
+        return "\n".join(p for p in parts if (p or "").strip())

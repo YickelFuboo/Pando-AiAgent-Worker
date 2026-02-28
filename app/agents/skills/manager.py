@@ -11,21 +11,15 @@ from pathlib import Path
 from app.agents.sessions.session import Session
 
 
-# 内置技能目录：当前文件所在目录（各技能为子目录，如 memory/SKILL.md）
-BUILTIN_SKILLS_DIR = Path(__file__).parent
-AGENT_DIR = Path(__file__).parent / "agent"
-
 class SkillsManager:
     """
     技能加载器：从工作区与内置目录列举/读取 SKILL.md，为 ContextBuilder 提供
     常驻技能全文与全体技能摘要（按需加载时 Agent 用 read_file 读 path）。
     """
-    def __init__(self, session: Session, workspace: Path):
-        self.session = session
-        self.workspace = workspace        
-        self.builtin_skills_dir = BUILTIN_SKILLS_DIR
-        self.agent_skills_dir = AGENT_DIR / session.agent_type / "skills"  # Agent特有的Skills
-        self.workspace_skills_dir = workspace / "skills"  # 用户工作区技能，同名覆盖 builtin
+    def __init__(self, agent_path: str, workspace_path: str):      
+        self.builtin_skills_dir = Path(Path(__file__).parent)
+        self.agent_skills_dir = Path(agent_path) / "skills"  # Agent特有的Skills
+        self.workspace_skills_dir = Path(workspace_path) / "skills"  # 用户工作区技能，同名覆盖 builtin
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """

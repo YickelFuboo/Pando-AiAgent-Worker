@@ -75,7 +75,7 @@ class MessageBus:
         while True:
             inbound_msg = await self.pop_inbound()
             if inbound_msg:
-                await self.process_message(inbound_msg)
+                await self._process_message(inbound_msg)
 
             outbound_msg = await self.pop_outbound()
             if outbound_msg:
@@ -83,7 +83,7 @@ class MessageBus:
                 if callback:
                     callback(outbound_msg)
 
-    async def process_message(self, inbound_msg: InboundMessage) -> None:
+    async def _process_message(self, inbound_msg: InboundMessage) -> None:
         """Process an inbound message."""
         agent = ReActAgent(
             name="ReActAgent", 

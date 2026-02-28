@@ -3,12 +3,16 @@ from pydantic import BaseModel, Field
 from abc import ABC
 from typing import List, Dict, Any, Optional, Literal, Tuple    
 from enum import Enum
+from pathlib import Path
 import logging
 from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.models import Role, Message, ToolCall, Function
 from app.infrastructure.llms.chat_models.factory import llm_factory
+from app.agents.core.context import ContextBuilder
+from app.agents.memorys.manager import MemoryManager
+from app.agents.skills.manager import SkillsManager
 
 
 class AgentState(str, Enum):
@@ -18,6 +22,10 @@ class AgentState(str, Enum):
     WAITING = "WAITING"  # Waiting for user input
     ERROR = "ERROR"  # Error state
     FINISHED = "FINISHED"  # Finished state
+
+# 当前文件所在目录（各技能为子目录，如 memory/SKILL.md）
+AGENT_DIR = Path(__file__).parent.parent / ".agent"
+WORKSPACE_DIR = Path(__file__).parent.parent / ".workspace"
 
 class BaseAgent(BaseModel, ABC):
     """Base Agent class
@@ -32,8 +40,13 @@ class BaseAgent(BaseModel, ABC):
     # 会话信息
     session_id: str = Field(..., description="Current session ID")
 
-    # 项目信息
-    workspace: str = Field(..., description="Workspace")
+    # Agent类型
+    agent_type: str = Field(..., description="Agent type")
+    agent_path: str = Field(..., description="Agent path")
+
+    # 运行空间信息
+    workspace_index: str = Field(..., description="Workspace index")
+    workspace_path: str = Field(..., description="Workspace path")
 
     # 提示词信息
     system_prompt: str = Field(..., description="System prompt")
@@ -53,7 +66,14 @@ class BaseAgent(BaseModel, ABC):
     max_steps: int = Field(default=50, description="Max steps")
     # 最大重复次数，用于检验当前项agent是否挂死
     max_duplicate_steps: int = 2
-    
+
+    # 上下文构建器
+    context_builder: ContextBuilder = Field(..., description="Context builder")
+    # 记忆管理器
+    memory_manager: MemoryManager = Field(..., description="Memory manager")
+    # 技能管理器
+    skills_manager: SkillsManager = Field(..., description="Skills manager")
+
     class Config:
         arbitrary_types_allowed = True
 
@@ -62,7 +82,8 @@ class BaseAgent(BaseModel, ABC):
         name: str,
         description: str,
         session_id: str,
-        workspace: str,
+        agent_type: str,
+        workspace_index: str,
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
         next_step_prompt: Optional[str] = None,
@@ -75,23 +96,31 @@ class BaseAgent(BaseModel, ABC):
         max_duplicate_steps: int = 2,
         **kwargs: Any,
     ):
-        super().__init__(
-            name=name,
-            description=description,
-            session_id=session_id,
-            workspace=workspace,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            next_step_prompt=next_step_prompt,
-            llm_provider=llm_provider,
-            llm_name=llm_name,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            memory_window=memory_window,
-            max_steps=max_steps,
-            max_duplicate_steps=max_duplicate_steps,
-            **kwargs,
-        )
+     
+        self.name=name,
+        self.description=description,
+        self.session_id=session_id,
+        self.agent_type=agent_type,
+        self.workspace_index=workspace_index,
+        self.system_prompt=system_prompt,
+        self.user_prompt=user_prompt,
+        self.next_step_prompt=next_step_prompt,
+        self.llm_provider=llm_provider,
+        self.llm_name=llm_name,
+        self.temperature=temperature,
+        self.max_tokens=max_tokens,
+        self.memory_window=memory_window,
+        self.max_steps=max_steps,
+        self.max_duplicate_steps=max_duplicate_steps,
+        self.kwargs=kwargs,
+
+        self.agent_path = AGENT_DIR / self.agent_type
+        self.workspace_path = WORKSPACE_DIR / self.workspace_index
+
+        self.context_builder = ContextBuilder(self.agent_path, self.workspace_path, self.kwargs)
+        self.memory_manager = MemoryManager(self.session_id, self.agent_path, self.workspace_path)
+        self.skills_manager = SkillsManager(self.agent_path, self.workspace_path)
+
 
     def reset(self):
         """重置 agent 状态到初始状态
