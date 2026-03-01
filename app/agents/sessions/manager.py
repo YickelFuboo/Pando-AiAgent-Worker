@@ -26,7 +26,7 @@ class SessionManager:
         description: str = "",
         metadata: Optional[Dict[str, Any]] = None,
         llm_provider: Optional[str] = None,
-        llm_name: Optional[str] = None
+        llm_model: Optional[str] = None
     ) -> str:
         """创建新会话。DB 由 Store 内部管理，不由 API 注入。"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -38,7 +38,7 @@ class SessionManager:
             description=description,
             session_type=session_type,
             llm_provider=llm_provider or "",
-            llm_name=llm_name or "",
+            llm_model=llm_model or "",
         )
         if metadata:
             for key, value in metadata.items():

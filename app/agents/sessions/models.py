@@ -13,7 +13,7 @@ class SessionRecord(Base):
     session_type = Column(String(64), nullable=False, comment="会话类型")
     user_id = Column(String(128), nullable=False, comment="用户ID")
     llm_provider = Column(String(128), nullable=False, server_default="", comment="模型提供者")
-    llm_name = Column(String(128), nullable=False, server_default="default", comment="模型名称")
+    llm_model = Column(String(128), nullable=False, server_default="default", comment="模型名称")
     metadata_ = Column("metadata", JSON, nullable=True, comment="元数据 JSON")
     messages = Column(JSON, nullable=False, comment="消息列表 JSON")
     last_consolidated = Column(Integer, nullable=False, server_default="0", comment="已合并消息数")

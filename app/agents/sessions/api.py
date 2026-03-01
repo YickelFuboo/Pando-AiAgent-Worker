@@ -6,7 +6,7 @@ from .schemes import SessionCreate, SessionInfo, UserMessage
 
 
 # 主路由
-router = APIRouter(prefix="/sessions", tags=["会话管理"])
+router = APIRouter(prefix="/sessions")
 
 
 @router.post(

@@ -8,11 +8,13 @@ from io import BytesIO
 from PIL import Image
 import asyncio
 import dashscope
+from pathlib import Path
 from dashscope import MultiModalConversation
 from app.config.settings import settings
 from app.utils.common import get_project_base_directory, is_english
 from app.infrastructure.llms.computervision_models.base.base import BaseComputerVision, MAX_RETRY_ATTEMPTS
-from app.aiframework.prompts import get_prompt_template
+from app.infrastructure.llms.prompts.prompt_template_load import get_prompt_template
+
 
 
 class QWenCV(BaseComputerVision):
@@ -277,7 +279,11 @@ class QWenCV(BaseComputerVision):
                 "content": [
                     {"image": f"file://{path}"},
                     {
-                        "text": prompt if prompt else get_prompt_template("cv/computer_vision_describe_prompt.md", {"page": None}),
+                        "text": prompt if prompt else get_prompt_template(
+                            str(Path(__file__).parent.parent / "prompts" / "cv"),
+                            "computer_vision_describe_prompt.md",
+                            {"page": None}
+                        ),
                     },
                 ],
             }

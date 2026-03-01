@@ -11,7 +11,7 @@ class SessionCreate(BaseModel):
     description: Optional[str] = Field(None, description="会话描述")
     metadata: Optional[Dict[str, Any]] = Field(None, description="会话元数据")
     llm_provider: str = Field(..., description="模型提供者")
-    llm_name: Optional[str] = Field(None, description="使用的模型名称")
+    llm_model: Optional[str] = Field(None, description="使用的模型名称")
 
 
 class SessionInfo(BaseModel):
@@ -23,7 +23,7 @@ class SessionInfo(BaseModel):
     last_updated: datetime = Field(..., description="最后更新时间")
     description: Optional[str] = Field(None, description="会话描述")
     llm_provider: str = Field(..., description="模型提供者")
-    llm_name: Optional[str] = Field(None, description="模型名称")
+    llm_model: Optional[str] = Field(None, description="模型名称")
     metadata: Optional[Dict[str, Any]] = Field(None, description="元数据")
 
     class Config:

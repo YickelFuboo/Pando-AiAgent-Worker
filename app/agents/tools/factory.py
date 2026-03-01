@@ -1,5 +1,5 @@
 from typing import Dict, List, Tuple, Any
-from app.logger import logger
+import logging
 from .base import BaseTool
 from .schemes import ToolResult, ToolSuccessResult, ToolTimeoutResult, ToolErrorResult, ToolCancelledResult
 
@@ -31,7 +31,7 @@ class ToolsFactory:
     async def execute(self, tool_name: str, tool_params: Dict[str, Any]) -> ToolResult:
         """执行工具调用"""
         try:
-            logger.info(f"execute_tool: {tool_name}, params: {tool_params}")
+            logging.info(f"execute_tool: {tool_name}, params: {tool_params}")
 
             tool = self.get_tool(tool_name)
             if not tool:
@@ -43,7 +43,7 @@ class ToolsFactory:
             missing = required - provided
             if missing:
                 msg = f"Missing required parameters: {', '.join(sorted(missing))}"
-                logger.error(msg)
+                logging.error(msg)
                 return ToolErrorResult(msg)
 
             # 检查参数是否合法
@@ -51,16 +51,16 @@ class ToolsFactory:
                 try:
                     errors = tool.validate_params(tool_params)  # type: ignore[attr-defined]
                 except Exception as e:
-                    logger.error("Tool(%s) schema validation error: %s", tool_name, e)
+                    logging.error("Tool(%s) schema validation error: %s", tool_name, e)
                     return ToolErrorResult(f"Tool parameter schema error: {e}")
                 if errors:
                     msg = "Invalid parameters: " + "; ".join(errors)
-                    logger.error("Tool(%s) %s", tool_name, msg)
+                    logging.error("Tool(%s) %s", tool_name, msg)
                     return ToolErrorResult(msg)
 
             # 执行工具调用
             return await tool.execute(**tool_params)
                 
         except Exception as e:
-            logger.error(f"Tool({tool_name}) execution error: {str(e)}")
+            logging.error(f"Tool({tool_name}) execution error: {str(e)}")
             return ToolErrorResult(f"Tool execution error: {str(e)}") 

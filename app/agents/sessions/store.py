@@ -124,7 +124,7 @@ def _row_to_session(row) -> Session:
         session_type=row.session_type,
         user_id=row.user_id,
         llm_provider=llm_provider,
-        llm_name=row.llm_name or "default",
+        llm_model=row.llm_model or "default",
         messages=messages,
         metadata=meta,
         last_consolidated=last_consolidated,
@@ -164,7 +164,7 @@ class DatabaseSessionStore(SessionStore):
                     rec.session_type = session.session_type
                     rec.user_id = session.user_id
                     rec.llm_provider = session.llm_provider or ""
-                    rec.llm_name = session.llm_name
+                    rec.llm_model = session.llm_model
                     rec.metadata_ = session.metadata
                     rec.messages = messages_json
                     rec.last_consolidated = session.last_consolidated
@@ -177,7 +177,7 @@ class DatabaseSessionStore(SessionStore):
                         session_type=session.session_type,
                         user_id=session.user_id,
                         llm_provider=session.llm_provider or "",
-                        llm_name=session.llm_name,
+                        llm_model=session.llm_model,
                         metadata_=session.metadata,
                         messages=messages_json,
                         last_consolidated=session.last_consolidated,

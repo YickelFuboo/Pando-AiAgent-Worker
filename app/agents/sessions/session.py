@@ -13,7 +13,7 @@ class Session(BaseModel):
     user_id: str
 
     llm_provider: str
-    llm_name: str = "default"
+    llm_model: str = "default"
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     # 会话历史信息
@@ -32,7 +32,7 @@ class Session(BaseModel):
             "session_type": self.session_type,
             "user_id": self.user_id,
             "llm_provider": self.llm_provider,
-            "llm_name": self.llm_name,
+            "llm_model": self.llm_model,
             "metadata": self.metadata,
             "messages": [msg.model_dump() for msg in self.messages],
             "last_consolidated": self.last_consolidated,
@@ -73,7 +73,7 @@ class Session(BaseModel):
             "last_updated": self.last_updated,
             "description": self.description,
             "llm_provider": self.llm_provider,
-            "llm_name": self.llm_name,
+            "llm_model": self.llm_model,
             "metadata": self.metadata,
         }
 

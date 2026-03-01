@@ -1,28 +1,29 @@
 import base64
+import logging
 import mimetypes
 import platform
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
-from ..prompts.prompt_template_load import get_prompt_template
+from typing import Any, Optional
+from app.infrastructure.llms.prompts.prompt_template_load import get_prompt_template
 from ..sessions.session import Session
 from ..skills.manager import SkillsManager
 from ..memorys.manager import MemoryManager
 
 
 # Agent目录下会被读入 system prompt 的引导文件名（按顺序，存在则读）
-AGENT_CONTEXT_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "RUNTIME.md"]
+AGENT_CONTEXT_FILES = ["AGENT.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "RUNTIME.md"]
 
 class ContextBuilder:
 
-    def __init__(self, session: Session, cur_agent_path: str, cur_workspace_path: str, *kwargs: Any):
-        self.session = session
+    def __init__(self, session_id: str, cur_agent_path: str, cur_workspace_path: str, params: Optional[dict[str, Any]] = None):
+        self.session_id = session_id
         self.cur_agent_path = cur_agent_path
         self.cur_workspace_path = cur_workspace_path
-        self.kwargs = kwargs
+        self.params = dict(params) if params else {}
         self.skills_manager = SkillsManager(cur_agent_path, cur_workspace_path)
-        self.memory_manager = MemoryManager(session, cur_agent_path, cur_workspace_path)
+        self.memory_manager = MemoryManager(session_id, cur_agent_path, cur_workspace_path)
     
     async def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
@@ -35,18 +36,19 @@ class ContextBuilder:
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
 
-        kwargs = {
+        self.params.update({
             "runtime": runtime,
-            "workspace_path": str(Path(self.cur_workspace_path).expanduser().resolve())
-        }
+            "workspace_path": str(Path(self.cur_workspace_path).expanduser().resolve()),
+        })  
 
         # 1. 构造Agent类型对应的引导文件
         agent_dir = Path(self.cur_agent_path)
         for filename in AGENT_CONTEXT_FILES:
             file = agent_dir / filename
             if file.exists():
-                content = get_prompt_template(str(agent_dir), filename, kwargs)
-                parts.append(f"{content}")
+                content = get_prompt_template(str(agent_dir), filename, self.params)
+                if content:
+                    parts.append(f"{content}")
 
         # 2. 长期记忆：组合三层记忆（会话/工作空间/Agent 类型）
         memory = await self.memory_manager.append_all_memory_context()

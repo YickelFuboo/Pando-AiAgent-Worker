@@ -1,7 +1,6 @@
-from .manager import MemoryExtractPrompt, MemoryManager, MEMORY_MANAGER
+from .manager import MemoryExtractPrompt, MemoryManager
 
 __all__ = [
     "MemoryExtractPrompt",
     "MemoryManager",
-    "MEMORY_MANAGER",
 ]

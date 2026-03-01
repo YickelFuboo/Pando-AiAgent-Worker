@@ -104,7 +104,8 @@ class SkillsManager:
             content = self.load_skill(name)
             if content:
                 content = self._strip_frontmatter(content)
-                parts.append(f"### Skill: {name}\n\n{content}")
+                content = self._increase_heading_levels(content, levels=2)
+                parts.append(f"## Skill: {name}\n\n{content}")
 
         return "\n\n---\n\n".join(parts) if parts else ""
     
@@ -142,6 +143,15 @@ class SkillsManager:
         lines.append("</skills>")
 
         return "\n".join(lines)
+
+    def _increase_heading_levels(self, content: str, levels: int = 2) -> str:
+        """将 markdown 标题层级增加 levels 级。原始从 # 开始，拼到 ## Skill 后应为 ### 起。"""
+        def repl(m):
+            prefix, hashes, space_rest = m.group(1), m.group(2), m.group(3)
+            new_level = min(len(hashes) + levels, 6)
+            return prefix + "#" * new_level + space_rest
+
+        return re.sub(r"^(\s*)(#{1,6})(\s+.*)$", repl, content, flags=re.MULTILINE)
 
     def _strip_frontmatter(self, content: str) -> str:
         """去掉 SKILL.md 开头的 YAML frontmatter（---...---），只保留正文。"""

@@ -2,7 +2,7 @@ import logging
 import uuid
 import asyncio
 from tavily import TavilyClient
-from app.rag_core.rag.nlp import rag_tokenizer
+#from app.rag_core.rag.nlp import rag_tokenizer
 from app.config import settings
 
 
@@ -24,6 +24,7 @@ class Tavily:
 
         return []
 
+    """
     async def retrieve_chunks(self, question):
         chunks = []
         aggs = []
@@ -55,3 +56,4 @@ class Tavily:
             })
             logging.info("[Tavily]R: "+r["content"][:128]+"...")
         return {"chunks": chunks, "doc_aggs": aggs}
+    """

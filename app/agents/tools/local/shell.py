@@ -1,15 +1,50 @@
 import asyncio
 import os
 import re
+import subprocess
+import sys
+import logging
 from pathlib import Path
 from typing import Any
 from ..base import BaseTool
 from ..schemes import ToolResult, ToolSuccessResult, ToolErrorResult
 
+DENY_PATTERNS_LINUX = [
+    r"\brm\s+-[rf]{1,2}\b",
+    r"\bdel\s+/[fq]\b",
+    r"\brmdir\s+/s\b",
+    r"(?:^|[;&|]\s*)format\b",
+    r"\b(mkfs|diskpart)\b",
+    r"\bdd\s+if=",
+    r">\s*/dev/sd",
+    r"\b(shutdown|reboot|poweroff)\b",
+    r":\(\)\s*\{.*\};\s*:",
+]
+
+DENY_PATTERNS_WIN = [
+    r"\bdel\s+/[fq]\b",
+    r"\brmdir\s+/s",
+    r"\bformat\b",
+    r"\bdiskpart\b",
+    r"\b(shutdown|reboot)\b",
+]
+
+
+def _run_shell_sync(command: str, cwd: str, timeout_sec: int) -> tuple[bytes, bytes, int]:
+    """同步执行 shell 命令，不依赖 asyncio 子进程，适用于 Windows 任意事件循环。"""
+    r = subprocess.run(
+        command,
+        shell=True,
+        cwd=cwd,
+        capture_output=True,
+        timeout=timeout_sec,
+    )
+    return (r.stdout or b""), (r.stderr or b""), (r.returncode or 0)
+
 
 class ExecTool(BaseTool):
     """Tool to execute shell commands."""
-    
+
     def __init__(
         self,
         timeout: int = 60,
@@ -19,28 +54,22 @@ class ExecTool(BaseTool):
         restrict_to_workspace: bool = False,
     ):
         self.timeout = timeout
-        self.working_dir = working_dir
-        self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
-        ]
+        self.working_dir = working_dir or os.getcwd()
+        default_deny = DENY_PATTERNS_WIN if sys.platform == "win32" else DENY_PATTERNS_LINUX
+        self.deny_patterns = deny_patterns or default_deny
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
-    
+
     @property
     def name(self) -> str:
         return "exec"
-    
+
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution."
+        base = "Execute a shell command and return its output. Use with caution."
+        if sys.platform == "win32":
+            base += " On Windows, use PowerShell or cmd; Unix commands (e.g. head, tail, grep) are not available by default."
+        return base
     
     @property
     def parameters(self) -> dict[str, Any]:
@@ -69,30 +98,39 @@ class ExecTool(BaseTool):
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return ToolErrorResult(guard_error)
-        
+
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(cwd_path),
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.timeout
+            if sys.platform == "win32":
+                loop = asyncio.get_event_loop()
+                stdout, stderr, returncode = await loop.run_in_executor(
+                    None,
+                    _run_shell_sync,
+                    command,
+                    str(cwd_path),
+                    self.timeout,
                 )
-            except asyncio.TimeoutError:
-                process.kill()
+            else:
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(cwd_path),
+                )
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=self.timeout,
+                    )
                 except asyncio.TimeoutError:
-                    pass
-                return ToolErrorResult(f"Error: Command timed out after {self.timeout} seconds")
-            
+                    process.kill()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        pass
+                    return ToolErrorResult(f"Error: Command timed out after {self.timeout} seconds")
+                returncode = process.returncode or 0
+
             output_parts = []
-            
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
             
@@ -100,21 +138,23 @@ class ExecTool(BaseTool):
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
-            
-            if process.returncode != 0:
-                output_parts.append(f"\nExit code: {process.returncode}")
-            
+
+            if returncode != 0:
+                output_parts.append(f"\nExit code: {returncode}")
+
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            
-            # Truncate very long output
             max_len = 10000
             if len(result) > max_len:
                 result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
 
             return ToolSuccessResult(result)
 
+        except subprocess.TimeoutExpired:
+            return ToolErrorResult(f"Error: Command timed out after {self.timeout} seconds")
         except Exception as e:
-            return ToolErrorResult(f"Error executing command: {str(e)}")
+            msg = str(e) or repr(e)
+            logging.error("Error executing command: %s (type=%s)", msg, type(e).__name__)
+            return ToolErrorResult(f"Error executing command: {msg}")
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
@@ -132,15 +172,9 @@ class ExecTool(BaseTool):
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
-
             cwd_path = Path(cwd).resolve()
-
             win_paths = re.findall(r"[A-Za-z]:\\[^\\\"']+", cmd)
-            # Only match absolute paths — avoid false positives on relative
-            # paths like ".venv/bin/python" where "/bin/python" would be
-            # incorrectly extracted by the old pattern.
             posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", cmd)
-
             for raw in win_paths + posix_paths:
                 try:
                     p = Path(raw.strip()).resolve()

@@ -1,7 +1,6 @@
 import json
-from pydantic import BaseModel, Field
 from abc import ABC
-from typing import List, Dict, Any, Optional, Literal, Tuple    
+from typing import List, Dict, Any, Optional, Literal, Tuple
 from enum import Enum
 import logging
 import re
@@ -9,52 +8,61 @@ from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.core.base import BaseAgent, AgentState
-from app.agents.sessions.models import Role, Message, ToolCall, Function
+from app.agents.sessions.message import Role, Message, ToolCall, Function
 from app.infrastructure.llms.chat_models.factory import llm_factory
-from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
+from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, ReleaseFileTextTool, InsertFileTool
+from app.agents.tools.local.dir_operator import ListDirTool
 from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.web import WebSearchTool, WebFetchTool
 from app.agents.tools.local.terminate import Terminate
 
 
+class ToolChoice(str, Enum):
+    """工具调用模式：none=不暴露工具，auto=由模型决定，required=必须调用工具。"""
+    NONE = "none"
+    AUTO = "auto"
+    REQUIRED = "required"
+
+
 class ReActAgent(BaseAgent):
-    # 工具信息
-    available_tools: ToolsFactory = Field(default_factory=ToolsFactory, description="List of available tools")
-    tool_choices: Literal["none", "auto", "required"] = "none"
-    special_tool_names: List[str] = Field(default=None, description="Special tool names")
+    """ReAct 执行类，属性仅在 __init__ 内通过 self 赋值。"""
 
     def __init__(
         self,
-        name: str,
-        description: str,
-        session_id: str,
+        agent_name: str,
+        agent_description: str,
         agent_type: str,
+        channel_type: str,
+        channel_id: str,
+        session_id: str,
         workspace_index: str,
+        user_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
         next_step_prompt: Optional[str] = None,
         llm_provider: Optional[str] = None,
-        llm_name: Optional[str] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 4096,
-        memory_window: int = 100,
-        max_steps: int = 50,
-        max_duplicate_steps: int = 2,
-        available_tools: ToolsFactory = Field(default_factory=ToolsFactory, description="List of available tools"),
-        tool_choices: Literal["none", "auto", "required"] = "none",
+        llm_model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        memory_window: Optional[int] = None,
+        max_steps: Optional[int] = None,
+        max_duplicate_steps: Optional[int] = None,
         **kwargs: Any,
     ):
         super().__init__(
-            name=name,
-            description=description,
-            session_id=session_id,
+            agent_name=agent_name,
+            agent_description=agent_description,
             agent_type=agent_type,
+            channel_type=channel_type,
+            channel_id=channel_id,
+            session_id=session_id,
             workspace_index=workspace_index,
+            user_id=user_id,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             next_step_prompt=next_step_prompt,
             llm_provider=llm_provider,
-            llm_name=llm_name,
+            llm_model=llm_model,
             temperature=temperature,
             max_tokens=max_tokens,
             memory_window=memory_window,
@@ -62,8 +70,11 @@ class ReActAgent(BaseAgent):
             max_duplicate_steps=max_duplicate_steps,
             **kwargs,
         )
-        self.available_tools = available_tools
-        self.tool_choices = tool_choices
+
+        # 工具信息
+        self.available_tools = ToolsFactory()
+        self.tool_choices = ToolChoice.AUTO
+        self.special_tool_names = []
         self._register_default_tools()
 
     def reset(self):
@@ -71,21 +82,21 @@ class ReActAgent(BaseAgent):
         - 工具调用状态清空
         """
         super().reset()
-        self.tool_choices = "none"
+        self.tool_choices = ToolChoice.AUTO
         self.special_tool_names = None
         logging.info(f"ReActAgent state reset to IDLE")
 
     def _register_default_tools(self) -> None:
         # 如果没有指定工具，则注册默认工具
-        if not self.available_tools:
-            self.available_tools = ToolsFactory()
+        if self.available_tools:
             self.available_tools.register_tools(
-                ReadFileTool(),
-                WriteFileTool(),
-                EditFileTool(),
-                ListDirTool(),
+                #ReadFileTool(),
+                #WriteFileTool(),
+                #ReleaseFileTextTool(),
+                #InsertFileTool(),
+                #ListDirTool(),
                 ExecTool(),
-                Terminate(),
+                #Terminate(),
             )
         # 登记特殊工具
         self.special_tool_names = [Terminate().name]
@@ -105,10 +116,10 @@ class ReActAgent(BaseAgent):
         Returns:
             str: Execution result
         """        
-        logging.info(f"Running agent {self.name} with question: {question}")
+        logging.info(f"Running agent {self.agent_name} with question: {question}")
 
-        if not self.session_id or not self.workspace:
-            raise ValueError("Session ID and workspace are required")
+        if not self.session_id or not self.workspace_index:
+            raise ValueError("Session ID and workspace_index are required")
         
         # 检查并重置状态
         if self.state != AgentState.IDLE:
@@ -117,7 +128,7 @@ class ReActAgent(BaseAgent):
         
         try:
             # 获取模型实例
-            llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_name)
+            llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
 
             # 更新历史记录
             await self.push_history_message(self.session_id, Message.user_message(question))
@@ -161,10 +172,10 @@ class ReActAgent(BaseAgent):
         except Exception as e:
             # 发生错误时设置错误状态
             self.state = AgentState.ERROR
-            self.notify_user(self.session_id, Message.assistant_message(f"Error in agent execution: {str(e)}"))
+            await self.push_history_message_and_notify_user(self.session_id, Message.assistant_message(f"Error in agent execution: {str(e)}"))
             raise e
 
-    async def think(self, llm: BaseModel, question: str) -> Tuple[str, bool]:
+    async def think(self, llm: Any, question: str) -> Tuple[str, bool]:
         """Think about the question"""
         # 获取当前会话历史
         history = await self.get_history_context(self.session_id)
@@ -172,8 +183,8 @@ class ReActAgent(BaseAgent):
         response = None
         tool_calls = []
         try:
-            if self.tool_choices == "none":
-                response = await llm.chat(
+            if self.tool_choices == ToolChoice.NONE:
+                response, token_count = await llm.chat(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
@@ -185,13 +196,13 @@ class ReActAgent(BaseAgent):
                     raise Exception(response.content)
             else:
                 # Get response with tool options
-                response = await llm.ask_tools(
+                response, token_count = await llm.ask_tools(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
                     history=history,
                     tools=self.available_tools.to_params(),
-                    tool_choice=self.tool_choices,
+                    tool_choice=self.tool_choices.value,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens
                 )
@@ -210,16 +221,16 @@ class ReActAgent(BaseAgent):
                         tool_calls.append(tool_call)
 
                 # 结果信息打印
-                logging.info(f"{self.name}'s thoughts: {response.content}")
-                logging.info(f"{self.name} selected {len(tool_calls)} tools to use")
+                logging.info(f"{self.agent_name}'s thoughts: {response.content} (Token count: {token_count})")
+                logging.info(f"{self.agent_name} selected {len(tool_calls)} tools to use")
 
-                if not tool_calls and self.tool_choices == "required":
+                if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
 
             return response.content, tool_calls
 
         except Exception as e:
-            logging.error(f"Error in {self.name}'s thinking process: {str(e)}")
+            logging.error(f"Error in {self.agent_name}'s thinking process: {str(e)}")
             raise RuntimeError(str(e))
 
     async def act(self, tool_calls: List[ToolCall]) -> None:
@@ -234,7 +245,7 @@ class ReActAgent(BaseAgent):
                 logging.info(f"Tool '{toolcall.function.name}' completed! Result: {result}")
         
         except Exception as e:
-            logging.error(f"Error in {self.name}'s act process: {str(e)}")
+            logging.error(f"Error in {self.agent_name}'s act process: {str(e)}")
             raise RuntimeError(str(e))
 
     async def execute_tool(self, toolcall: ToolCall) -> str:

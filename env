@@ -7,7 +7,7 @@
 # 基础配置
 # =============================================================================
 SERVICE_HOST=127.0.0.1
-SERVICE_PORT=8002
+SERVICE_PORT=9001
 
 DEBUG=true
 APP_LOG_LEVEL=WARNING
@@ -130,11 +130,6 @@ BRAVE_API_KEY=
 
 # ========================Agent配置========================
 # 会话存储方式：true=本地文件，false=数据库
-AGENT_SESSION_USE_LOCAL_STORAGE=false
+AGENT_SESSION_USE_LOCAL_STORAGE=true
 # 本地会话文件目录（仅当 AGENT_SESSION_USE_LOCAL_STORAGE=true 时生效）
 AGENT_SESSION_STORAGE_DIR=data/sessions
-
-# 记忆存储方式：true=本地文件，false=数据库
-AGENT_MEMORY_USE_LOCAL_STORAGE=false
-# 本地记忆文件目录（仅当 AGENT_MEMORY_USE_LOCAL_STORAGE=true 时生效）
-AGENT_MEMORY_STORAGE_DIR=data/memory

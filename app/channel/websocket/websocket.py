@@ -10,6 +10,7 @@ from .scheme import WebSocketMessage, WebSocketMessageType
 
 router = APIRouter()
 
+
 # 采用websocket模式连接前后端
 @router.websocket("/{agent_type}/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str = None):

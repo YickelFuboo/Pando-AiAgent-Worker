@@ -91,8 +91,8 @@ _SAVE_MEMORY_TOOL = [
 class MemoryManager:
     """记忆管理器：实现三层记忆（会话/工作空间/Agent 类型）。"""
 
-    def __init__(self, session: Session, cur_agent_path: str, cur_workspace_path: str) -> None:
-        self._session = session
+    def __init__(self, session_id: str, cur_agent_path: str, cur_workspace_path: str) -> None:
+        self._session_id = session_id
         self._agent_memory = Path(cur_agent_path) / "memory" / "MEMORY.md"  
         self._agent_history = Path(cur_agent_path) / "memory" / "HISTORY.md"
         self._workspace_memory = Path(cur_workspace_path) / "memory" / "MEMORY.md"
@@ -128,14 +128,14 @@ class MemoryManager:
         system_prompt: str,
         user_question: str,
         llm_provider: str,
-        llm_name: str,
+        llm_model: str,
     ) -> Tuple[Optional[str], Optional[str]]:
         """调用 LLM 提取记忆，返回 (memory_update, history_entry)，不写入 store。由调用方决定写入 session 或 store。"""
         try:
-            model = llm_factory.create_model(llm_provider, llm_name)
+            model = llm_factory.create_model(llm_provider, llm_model)
             if model is None:
                 logging.warning(
-                    "Memory extract: cannot create model %s/%s", llm_provider, llm_name
+                    "Memory extract: cannot create model %s/%s", llm_provider, llm_model
                 )
                 return None, None
             
@@ -172,10 +172,14 @@ class MemoryManager:
         self,
         content: str,
         llm_provider: str,
-        llm_name: str,
+        llm_model: str,
     ) -> None:
         """会话记忆合并：提炼到 session.memory。content 为待处理消息行（不含标题），此处拼上「## Content to Process」。"""
-        current_memory = self._session.memory or ""
+        session = await SESSION_MANAGER.get_session(self._session_id)
+        if not session:
+            return
+
+        current_memory = session.memory or ""
         user_content = f"## Current Session Memory\n{current_memory or '(empty)'}\n\n## Content to Process\n{content}"
         user_question = f"{MemoryExtractPrompt.for_session().user_instruction}\n\n{user_content}"
 
@@ -183,17 +187,17 @@ class MemoryManager:
             system_prompt=MemoryExtractPrompt.for_session().system_prompt,
             user_question=user_question,
             llm_provider=llm_provider,
-            llm_name=llm_name,
+            llm_model=llm_model,
         )
         if memory_update is not None:
-            self._session.memory = memory_update
-            await SESSION_MANAGER.save_session(self._session.session_id)
+            session.memory = memory_update
+            await SESSION_MANAGER.save_session(session.session_id)
 
     async def _consolidate_workspace_memory(
         self,
         content: str,
         llm_provider: str,
-        llm_name: str,
+        llm_model: str,
     ) -> None:
         """工作空间记忆合并：提炼到 .workspace/<workspace_index>/memory.md。"""
         current_memory = await self._read_file(self._workspace_memory)
@@ -204,7 +208,7 @@ class MemoryManager:
             system_prompt=MemoryExtractPrompt.for_workspace().system_prompt,
             user_question=user_question,
             llm_provider=llm_provider,
-            llm_name=llm_name,
+            llm_model=llm_model,
         )
         if memory_update is not None and memory_update != current_memory:
             await self._write_file(self._workspace_memory, memory_update)
@@ -215,7 +219,7 @@ class MemoryManager:
         self,
         content: str,
         llm_provider: str,
-        llm_name: str,
+        llm_model: str,
     ) -> None:
         """Agent 类型记忆合并：提炼到 .agent/<agent_type>/memory.md。"""
         current_memory = await self._read_file(self._agent_memory)
@@ -226,7 +230,7 @@ class MemoryManager:
             system_prompt=MemoryExtractPrompt.for_agent().system_prompt,
             user_question=user_question,
             llm_provider=llm_provider,
-            llm_name=llm_name,
+            llm_model=llm_model,
         )
         if memory_update is not None and memory_update != current_memory:
             await self._write_file(self._agent_memory, memory_update)
@@ -236,7 +240,7 @@ class MemoryManager:
     async def consolidate_memory(
         self,
         llm_provider: str = "",
-        llm_name: str = "",
+        llm_model: str = "",
         *,
         archive_all: bool = False,
         memory_window: int = 50,
@@ -245,17 +249,21 @@ class MemoryManager:
         with_agent_type_memory: bool = True,
     ) -> bool:
         """记忆合并入口：基于 last_consolidated 取待处理消息，依次执行会话/工作空间/Agent 类型三层记忆提取，最后统一更新 last_consolidated 并持久化会话。"""
+        session = await SESSION_MANAGER.get_session(self._session_id)
+        if not session:
+            return False
+            
         if archive_all:
-            old_messages = self._session.messages
+            old_messages = session.messages
             keep_count = 0
         else:
             keep_count = max(0, memory_window // 2)
-            if len(self._session.messages) <= keep_count:
+            if len(session.messages) <= keep_count:
                 return True
-            if len(self._session.messages) - self._session.last_consolidated <= 0:
+            if len(session.messages) - session.last_consolidated <= 0:
                 return True
-            old_messages = self._session.messages[
-                self._session.last_consolidated : -keep_count if keep_count else len(self._session.messages)
+            old_messages = session.messages[
+                session.last_consolidated : -keep_count if keep_count else len(session.messages)
             ]
         # 如果没有需要合并的消息，则直接返回
         if not old_messages:
@@ -273,8 +281,8 @@ class MemoryManager:
             return True
         content = "\n".join(lines)
         
-        provider = llm_provider or getattr(self._session, "llm_provider", "") or ""
-        model = llm_name or getattr(self._session, "llm_name", "") or ""
+        provider = llm_provider or getattr(session, "llm_provider", "") or ""
+        model = llm_model or getattr(session, "llm_model", "") or ""
         if with_session_memory:
             await self._consolidate_session_memory(content, provider, model)
         if with_workspace_memory:
@@ -283,22 +291,26 @@ class MemoryManager:
             await self._consolidate_agent_type_memory(content, provider, model)
 
         # 更新会话的 last_consolidated 并持久化会话
-        self._session.last_consolidated = (
-            len(self._session.messages) if archive_all else (len(self._session.messages) - keep_count)
+        session.last_consolidated = (
+            len(session.messages) if archive_all else (len(session.messages) - keep_count)
         )
-        await SESSION_MANAGER.save_session(self._session.session_id)
+        await SESSION_MANAGER.save_session(session.session_id)
 
         logging.info(
             "Memory consolidation done: last_consolidated=%s",
-            self._session.last_consolidated,
+            session.last_consolidated,
         )
         return True
 
-    def append_session_memory_context(self) -> str:
+    async def append_session_memory_context(self) -> str:
         """将会话记忆拼成可追加到 Prompt 的 Markdown 片段（来自 session.memory）。"""
-        if not (self._session.memory or "").strip():
+        session = await SESSION_MANAGER.get_session(self._session_id)
+        if not session:
             return ""
-        return f"## current session memory\n{self._session.memory.strip()}\n"
+
+        if not (session.memory or "").strip():
+            return ""
+        return f"## current session memory\n{session.memory.strip()}\n"
 
     async def append_workspace_memory_context(self) -> str:
         """将工作空间记忆拼成可追加到 Prompt 的 Markdown 片段（来自 .workspace/<workspace_index>/memory.md）。"""
@@ -319,7 +331,7 @@ class MemoryManager:
     ) -> str:
         """组合三层记忆上下文（会话/工作空间/Agent 类型），供上层一次性拼接到 prompt。"""
         parts = [
-            self.append_session_memory_context(),
+            await self.append_session_memory_context(),
             await self.append_workspace_memory_context(),
             await self.append_agent_type_memory_context(),
         ]

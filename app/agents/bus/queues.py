@@ -3,16 +3,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict
 from app.agents.core.react import ReActAgent
+from app.agents.sessions.manager import SESSION_MANAGER
 
 
 @dataclass
 class InboundMessage:
     """Message received from a chat channel."""
+    agent_type: str
     channel_type: str  # telegram, discord, slack, whatsapp
     channel_id: str  # Channel identifier
-    user_id: str  # User identifier
     session_id: str  # Session identifier
-    agent_type: str
+    user_id: str  # User identifier
     content: str  # Message text
     llm_provider: str = ""
     llm_model: str = ""
@@ -89,13 +90,25 @@ class MessageBus:
 
     async def _process_message(self, inbound_msg: InboundMessage) -> None:
         """Process an inbound message."""
+        session_id = inbound_msg.session_id
+        if not session_id:
+           raise ValueError("Session ID is required")
+        
+        session = await SESSION_MANAGER.get_session(session_id)
+        if not session:
+            raise ValueError("Session not found")
+        
         agent = ReActAgent(
-            name="ReActAgent", 
-            description="A ReAct agent", 
+            agent_name="ReActAgent", 
+            agent_description="A ReAct agent", 
+            agent_type=inbound_msg.agent_type,
             channel_type=inbound_msg.channel_type,
             channel_id=inbound_msg.channel_id,
-            session_id=inbound_msg.session_id, 
-            workspace=inbound_msg.session_id
+            session_id=inbound_msg.session_id,
+            workspace_index=inbound_msg.session_id,
+            user_id=inbound_msg.user_id,
+            llm_provider=inbound_msg.llm_provider,
+            llm_model=inbound_msg.llm_model,
         )
 
         # 运行Agent
