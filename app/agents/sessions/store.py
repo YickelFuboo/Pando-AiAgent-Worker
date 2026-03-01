@@ -63,6 +63,7 @@ class LocalFileSessionStore(SessionStore):
     async def save(self, session: Session) -> None:
         path = os.path.join(self.storage_dir, f"{session.session_id}.json")
         try:
+            os.makedirs(self.storage_dir, exist_ok=True)
             data = session.model_dump()
 
             def write_file():

@@ -130,9 +130,6 @@ class ReActAgent(BaseAgent):
             # 获取模型实例
             llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
 
-            # 更新历史记录
-            await self.push_history_message(self.session_id, Message.user_message(question))
-            
             # 构建系统提示词和用户提示词，仅当返回有效值时才覆盖默认值
             self.system_prompt = await self.context_builder.build_system_prompt() or self.system_prompt
             question = await self.context_builder.build_user_content(question)
@@ -140,6 +137,9 @@ class ReActAgent(BaseAgent):
             # 设置运行状态
             self.state = AgentState.RUNNING
             logging.info(f"Agent state set to RUNNING")
+
+            # 设置添加用户消息到history标志
+            push_user_message_flag = False
             
             while (self.current_step < self.max_steps and self.state != AgentState.FINISHED):
                 self.current_step += 1
@@ -148,9 +148,15 @@ class ReActAgent(BaseAgent):
                 # 模型思考和工具调度
                 content, tool_calls = await self.think(llm, question)
                 if not tool_calls or self._has_special_tool(tool_calls):
+                    if not push_user_message_flag:
+                        await self.push_history_message(self.session_id, Message.user_message(question))
+                        push_user_message_flag = True
                     await self.push_history_message(self.session_id, Message.assistant_message(content))
                     break
                 else:
+                    if not push_user_message_flag:
+                        await self.push_history_message(self.session_id, Message.user_message(question))
+                        push_user_message_flag = True
                     await self.push_history_message_and_notify_user(self.session_id, Message.tool_call_message(content, tool_calls))    
                     await self.act(tool_calls)
 
