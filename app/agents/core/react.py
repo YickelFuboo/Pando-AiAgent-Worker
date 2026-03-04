@@ -9,6 +9,7 @@ from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.core.base import BaseAgent, AgentState
 from app.agents.sessions.message import Role, Message, ToolCall, Function
+from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, ReleaseFileTextTool, InsertFileTool
 from app.agents.tools.local.dir_operator import ListDirTool
@@ -34,7 +35,7 @@ class ReActAgent(BaseAgent):
         agent_type: str,
         channel_type: str,
         channel_id: str,
-        session_id: str,
+        session: Session,
         workspace_index: str,
         user_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
@@ -55,7 +56,7 @@ class ReActAgent(BaseAgent):
             agent_type=agent_type,
             channel_type=channel_type,
             channel_id=channel_id,
-            session_id=session_id,
+            session=session,
             workspace_index=workspace_index,
             user_id=user_id,
             system_prompt=system_prompt,
@@ -118,8 +119,8 @@ class ReActAgent(BaseAgent):
         """        
         logging.info(f"Running agent {self.agent_name} with question: {question}")
 
-        if not self.session_id or not self.workspace_index:
-            raise ValueError("Session ID and workspace_index are required")
+        if not self.session or not self.workspace_index:
+            raise ValueError("Session and workspace_index are required")
         
         # 检查并重置状态
         if self.state != AgentState.IDLE:
@@ -139,7 +140,7 @@ class ReActAgent(BaseAgent):
             logging.info(f"Agent state set to RUNNING")
 
             # 设置添加用户消息到history标志
-            push_user_message_flag = False
+            had_push_user_message = False
             
             while (self.current_step < self.max_steps and self.state != AgentState.FINISHED):
                 self.current_step += 1
@@ -148,16 +149,16 @@ class ReActAgent(BaseAgent):
                 # 模型思考和工具调度
                 content, tool_calls = await self.think(llm, question)
                 if not tool_calls or self._has_special_tool(tool_calls):
-                    if not push_user_message_flag:
-                        await self.push_history_message(self.session_id, Message.user_message(question))
-                        push_user_message_flag = True
-                    await self.push_history_message(self.session_id, Message.assistant_message(content))
+                    if not had_push_user_message:
+                        await self.push_history_message(Message.user_message(question))
+                        had_push_user_message = True
+                    await self.push_history_message(Message.assistant_message(content))
                     break
                 else:
-                    if not push_user_message_flag:
-                        await self.push_history_message(self.session_id, Message.user_message(question))
-                        push_user_message_flag = True
-                    await self.push_history_message_and_notify_user(self.session_id, Message.tool_call_message(content, tool_calls))    
+                    if not had_push_user_message:
+                        await self.push_history_message(Message.user_message(question))
+                        had_push_user_message = True
+                    await self.push_history_message_and_notify_user(Message.tool_call_message(content, tool_calls))    
                     await self.act(tool_calls)
 
                 # 检查模型是否进行死循环
@@ -178,13 +179,13 @@ class ReActAgent(BaseAgent):
         except Exception as e:
             # 发生错误时设置错误状态
             self.state = AgentState.ERROR
-            await self.push_history_message_and_notify_user(self.session_id, Message.assistant_message(f"Error in agent execution: {str(e)}"))
+            await self.push_history_message_and_notify_user(Message.assistant_message(f"Error in agent execution: {str(e)}"))
             raise e
 
     async def think(self, llm: Any, question: str) -> Tuple[str, bool]:
         """Think about the question"""
         # 获取当前会话历史
-        history = await self.get_history_context(self.session_id)
+        history = await self.get_history_context()
 
         response = None
         tool_calls = []
@@ -245,7 +246,7 @@ class ReActAgent(BaseAgent):
             for toolcall in tool_calls:
                 # 执行工具
                 result = await self.execute_tool(toolcall)  
-                await self.push_history_message_and_notify_user(self.session_id, Message.tool_result_message(
+                await self.push_history_message_and_notify_user(Message.tool_result_message(
                     result, toolcall.function.name, toolcall.id)
                 )            
                 logging.info(f"Tool '{toolcall.function.name}' completed! Result: {result}")

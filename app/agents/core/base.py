@@ -8,6 +8,7 @@ from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.message import Role, Message
+from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
@@ -41,7 +42,7 @@ class BaseAgent(ABC):
         agent_type: str,
         channel_type: str,
         channel_id: str,
-        session_id: str,
+        session: Session,
         workspace_index: str,
         user_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
@@ -66,7 +67,7 @@ class BaseAgent(ABC):
         self.channel_id = channel_id
 
         # 会话与用户
-        self.session_id = session_id
+        self.session = session
         self.workspace_index = workspace_index
         self.user_id = user_id
 
@@ -91,8 +92,8 @@ class BaseAgent(ABC):
         # 上下文构建器、记忆管理器、技能管理器        
         cur_agent_path = str(AGENT_DIR / agent_type)
         cur_workspace_path = str(WORKSPACE_DIR / workspace_index)
-        self.context_builder = ContextBuilder(session_id, cur_agent_path, cur_workspace_path, kwargs)
-        self.memory_manager = MemoryManager(session_id, cur_agent_path, cur_workspace_path)
+        self.context_builder = ContextBuilder(session.session_id, cur_agent_path, cur_workspace_path, kwargs)
+        self.memory_manager = MemoryManager(session.session_id, cur_agent_path, cur_workspace_path)
         self.skills_manager = SkillsManager(cur_agent_path, cur_workspace_path)
 
     def reset(self):
@@ -130,7 +131,7 @@ class BaseAgent(ABC):
 
     async def is_stuck(self) -> bool:
         """Check if the agent is stuck in a loop by detecting duplicate content"""
-        history = await self.get_history_messages(self.session_id)
+        history = await self.get_history_messages(self.session.session_id)
         if len(history) < 2:
             return False
 
@@ -155,23 +156,20 @@ class BaseAgent(ABC):
         """
         return self.state
 
-    async def get_history_messages(self, session_id: str) -> List[Message]:
+    async def get_history_messages(self) -> List[Message]:
         """Get messages from session"""
-        return await SESSION_MANAGER.get_messages(session_id)
+        return self.session.get_messages()
 
-    async def get_history_context(self, session_id: str) -> List[Dict[str, Any]]:
+    async def get_history_context(self) -> List[Dict[str, Any]]:
         """Get history for context"""
-        session = await SESSION_MANAGER.get_session(session_id)
-        if not session:
-            return None
-        return session.get_context()
+        return self.session.get_context()
 
-    async def push_history_message(self, session_id: str, message: Message):
+    async def push_history_message(self, message: Message):
         """Add message to session and push user"""
         # 记录会话历史
-        await SESSION_MANAGER.add_message(session_id, message)
+        self.session.add_message(message)
 
-    async def notify_user(self, session_id: str, message: Message):
+    async def notify_user(self, message: Message):
         """Notify user"""
         msg_dict = message.to_user_message()
         from app.agents.bus.queues import MESSAGE_BUS, OutboundMessage
@@ -179,12 +177,12 @@ class BaseAgent(ABC):
             channel_type=self.channel_type,
             channel_id=self.channel_id,
             user_id=self.user_id,
-            session_id=self.session_id,
+            session_id=self.session.session_id,
             content=msg_dict.get("content", ""),
         ))
 
-    async def push_history_message_and_notify_user(self, session_id: str, message: Message):
+    async def push_history_message_and_notify_user(self, message: Message):
         """Add message to session and push user"""
-        await self.push_history_message(session_id, message)
-        await self.notify_user(session_id, message)
+        await self.push_history_message(message)
+        await self.notify_user(message)
 
