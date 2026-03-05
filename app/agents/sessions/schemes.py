@@ -6,7 +6,8 @@ from .message import Message
 
 class SessionCreate(BaseModel):
     """会话创建请求"""
-    session_type: str = Field(..., description="会话类型")
+    agent_type: str = Field(..., description="Agent 类型")
+    channel_type: str = Field(default="", description="渠道类型")
     user_id: str = Field(..., description="用户ID")
     description: Optional[str] = Field(None, description="会话描述")
     metadata: Optional[Dict[str, Any]] = Field(None, description="会话元数据")
@@ -17,7 +18,8 @@ class SessionCreate(BaseModel):
 class SessionInfo(BaseModel):
     """会话列表/概要信息"""
     session_id: str = Field(..., description="会话ID")
-    session_type: str = Field(..., description="会话类型")
+    agent_type: str = Field(..., description="Agent 类型")
+    channel_type: str = Field(default="", description="渠道类型")
     user_id: str = Field(..., description="用户ID")
     created_at: datetime = Field(..., description="创建时间")
     last_updated: datetime = Field(..., description="最后更新时间")

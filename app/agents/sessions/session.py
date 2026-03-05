@@ -9,7 +9,8 @@ class Session(BaseModel):
 
     session_id: str
     description: Optional[str] = None
-    session_type: str
+    agent_type: str
+    channel_type: str = ""
     user_id: str
 
     llm_provider: str
@@ -29,7 +30,8 @@ class Session(BaseModel):
         return {
             "session_id": self.session_id,
             "description": self.description,
-            "session_type": self.session_type,
+            "agent_type": self.agent_type,
+            "channel_type": self.channel_type,
             "user_id": self.user_id,
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
@@ -67,7 +69,8 @@ class Session(BaseModel):
         """会话关键信息，供 API 列表等使用。"""
         return {
             "session_id": self.session_id,
-            "session_type": self.session_type,
+            "agent_type": self.agent_type,
+            "channel_type": self.channel_type,
             "user_id": self.user_id,
             "created_at": self.created_at,
             "last_updated": self.last_updated,

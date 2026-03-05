@@ -29,8 +29,22 @@ class SessionStore(ABC):
         """删除会话，返回是否成功。"""
 
     @abstractmethod
-    async def get_all(self) -> List[Session]:
-        """返回当前全部会话列表（文件存储用内部缓存，DB 直接查库）。"""
+    async def get_all(
+        self,
+        *,
+        agent_type: Optional[str] = None,
+        channel_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Session]:
+        """返回会话列表；可选按 agent_type、channel_type、user_id 过滤（DB 层 WHERE，文件存储内存过滤）。"""
+
+
+def _normalize_session_data(data: dict) -> None:
+    """兼容旧 JSON：session_type -> agent_type，补全 channel_type。"""
+    if "session_type" in data and "agent_type" not in data:
+        data["agent_type"] = data.pop("session_type")
+    if "channel_type" not in data:
+        data["channel_type"] = ""
 
 
 class LocalFileSessionStore(SessionStore):
@@ -47,6 +61,7 @@ class LocalFileSessionStore(SessionStore):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            _normalize_session_data(data)
             return Session(**data)
         except Exception as e:
             logging.error("Error loading session %s: %s", session_id, e)
@@ -69,6 +84,7 @@ class LocalFileSessionStore(SessionStore):
             def write_file():
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
+
             await asyncio.to_thread(write_file)
             self._cache[session.session_id] = session
         except Exception as e:
@@ -87,7 +103,13 @@ class LocalFileSessionStore(SessionStore):
             logging.error("Error deleting session %s: %s", session_id, e)
             return False
 
-    async def get_all(self) -> List[Session]:
+    async def get_all(
+        self,
+        *,
+        agent_type: Optional[str] = None,
+        channel_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Session]:
         if not os.path.exists(self.storage_dir):
             os.makedirs(self.storage_dir, exist_ok=True)
             logging.info("Created sessions directory: %s", self.storage_dir)
@@ -102,11 +124,20 @@ class LocalFileSessionStore(SessionStore):
                 def read_file():
                     with open(path, "r", encoding="utf-8") as f:
                         return json.load(f)
+
                 data = await asyncio.to_thread(read_file)
+                _normalize_session_data(data)
                 self._cache[session_id] = Session(**data)
             except Exception as e:
                 logging.error("Error loading session %s: %s", session_id, e)
-        return list(self._cache.values())
+        out = list(self._cache.values())
+        if agent_type is not None:
+            out = [s for s in out if s.agent_type == agent_type]
+        if channel_type is not None:
+            out = [s for s in out if s.channel_type == channel_type]
+        if user_id is not None:
+            out = [s for s in out if s.user_id == user_id]
+        return out
 
 
 def _row_to_session(row) -> Session:
@@ -119,10 +150,13 @@ def _row_to_session(row) -> Session:
     llm_provider = getattr(row, "llm_provider", None) or ""
     last_consolidated = getattr(row, "last_consolidated", 0) or 0
     memory = getattr(row, "memory", None) or ""
+    agent_type = getattr(row, "agent_type", None) or getattr(row, "session_type", "") or ""
+    channel_type = getattr(row, "channel_type", None) or ""
     return Session(
         session_id=row.session_id,
         description=row.description,
-        session_type=row.session_type,
+        agent_type=agent_type,
+        channel_type=channel_type,
         user_id=row.user_id,
         llm_provider=llm_provider,
         llm_model=row.llm_model or "default",
@@ -162,7 +196,8 @@ class DatabaseSessionStore(SessionStore):
                 if r:
                     rec = r
                     rec.description = session.description
-                    rec.session_type = session.session_type
+                    rec.agent_type = session.agent_type
+                    rec.channel_type = session.channel_type or ""
                     rec.user_id = session.user_id
                     rec.llm_provider = session.llm_provider or ""
                     rec.llm_model = session.llm_model
@@ -175,7 +210,8 @@ class DatabaseSessionStore(SessionStore):
                     db.add(SessionRecord(
                         session_id=session.session_id,
                         description=session.description,
-                        session_type=session.session_type,
+                        agent_type=session.agent_type,
+                        channel_type=session.channel_type or "",
                         user_id=session.user_id,
                         llm_provider=session.llm_provider or "",
                         llm_model=session.llm_model,
@@ -207,10 +243,23 @@ class DatabaseSessionStore(SessionStore):
             break
         return False
 
-    async def get_all(self) -> List[Session]:
+    async def get_all(
+        self,
+        *,
+        agent_type: Optional[str] = None,
+        channel_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Session]:
         result: List[Session] = []
         async for db in get_db():
-            rows = (await db.execute(select(SessionRecord))).scalars().all()
+            q = select(SessionRecord)
+            if agent_type is not None:
+                q = q.where(SessionRecord.agent_type == agent_type)
+            if channel_type is not None:
+                q = q.where(SessionRecord.channel_type == channel_type)
+            if user_id is not None:
+                q = q.where(SessionRecord.user_id == user_id)
+            rows = (await db.execute(q)).scalars().all()
             for row in rows:
                 try:
                     result.append(_row_to_session(row))

@@ -28,16 +28,16 @@ async def create_session(session_create: SessionCreate):
     response_model=List[SessionInfo],
 )
 async def list_sessions(
-    session_type: Optional[str] = None,
+    agent_type: Optional[str] = None,
+    channel_type: Optional[str] = None,
     user_id: Optional[str] = None,
 ):
-    """获取会话列表；可选按 session_type 或 user_id 过滤。"""
-    if session_type:
-        sessions = await SESSION_MANAGER.get_sessions_by_type(session_type)
-    elif user_id:
-        sessions = await SESSION_MANAGER.get_sessions_by_user_id(user_id)
-    else:
-        sessions = await SESSION_MANAGER.get_all_sessions()
+    """获取会话列表；支持 agent_type、channel_type、user_id 组合过滤（过滤在 store 层执行）。"""
+    sessions = await SESSION_MANAGER.get_all_sessions(
+        agent_type=agent_type,
+        channel_type=channel_type,
+        user_id=user_id,
+    )
     return [SessionInfo(**s.to_information()) for s in sessions]
 
 @router.get(
