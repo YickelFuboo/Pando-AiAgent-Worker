@@ -11,6 +11,9 @@ from pathlib import Path
 from app.agents.sessions.session import Session
 
 
+SKILLS_DIR = "skills"
+
+
 class SkillsManager:
     """
     技能加载器：从工作区与内置目录列举/读取 SKILL.md，为 ContextBuilder 提供
@@ -18,8 +21,8 @@ class SkillsManager:
     """
     def __init__(self, cur_agent_path: str, cur_workspace_path: str):      
         self.builtin_skills_dir = Path(Path(__file__).parent)
-        self.agent_skills_dir = Path(cur_agent_path) / "skills"  # Agent特有的Skills
-        self.workspace_skills_dir = Path(cur_workspace_path) / "skills"  # 用户工作区技能，同名覆盖 builtin
+        self.agent_skills_dir = Path(cur_agent_path) / SKILLS_DIR  # Agent特有的Skills
+        self.workspace_skills_dir = Path(cur_workspace_path) / SKILLS_DIR  # 用户工作区技能，同名覆盖 builtin
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """

@@ -1,0 +1,21 @@
+{
+  "mcp_servers": [
+    {
+      "id": "filesystem",
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "env": {},
+      "timeout_ms": 30000,
+      "tools": []
+    },
+    {
+      "id": "github",
+      "type": "sse",
+      "endpoint": "https://your-mcp-host/github",
+      "api_key_env": "GITHUB_TOKEN",
+      "timeout_ms": 30000,
+      "tools": ["search_repositories", "create_issue", "get_file"]
+    }
+  ]
+}

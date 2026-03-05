@@ -88,15 +88,17 @@ _SAVE_MEMORY_TOOL = [
 ]
 
 
+MEMORY_DIR = "memory"
+
 class MemoryManager:
     """记忆管理器：实现三层记忆（会话/工作空间/Agent 类型）。"""
 
     def __init__(self, session_id: str, cur_agent_path: str, cur_workspace_path: str) -> None:
         self._session_id = session_id
-        self._agent_memory = Path(cur_agent_path) / "memory" / "MEMORY.md"  
-        self._agent_history = Path(cur_agent_path) / "memory" / "HISTORY.md"
-        self._workspace_memory = Path(cur_workspace_path) / "memory" / "MEMORY.md"
-        self._workspace_history = Path(cur_workspace_path) / "memory" / "HISTORY.md"
+        self._agent_memory = Path(cur_agent_path) / MEMORY_DIR / "MEMORY.md"  
+        self._agent_history = Path(cur_agent_path) / MEMORY_DIR / "HISTORY.md"
+        self._workspace_memory = Path(cur_workspace_path) / MEMORY_DIR / "MEMORY.md"
+        self._workspace_history = Path(cur_workspace_path) / MEMORY_DIR / "HISTORY.md"
 
     async def _read_file(self, file: Path) -> str:
         if not file.exists():
@@ -199,7 +201,7 @@ class MemoryManager:
         llm_provider: str,
         llm_model: str,
     ) -> None:
-        """工作空间记忆合并：提炼到 .workspace/<workspace_index>/memory.md。"""
+        """工作空间记忆合并：提炼到 .workspace/<workspace_index>/memory/memory.md。"""
         current_memory = await self._read_file(self._workspace_memory)
         user_content = f"## Current Workspace Memory\n{current_memory or '(empty)'}\n\n## Content to Process\n{content}"
         user_question = f"{MemoryExtractPrompt.for_workspace().user_instruction}\n\n{user_content}"

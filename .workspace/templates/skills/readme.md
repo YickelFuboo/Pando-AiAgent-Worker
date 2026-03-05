@@ -1,0 +1,1 @@
+本目录管理当前workspace扩展的skills，每个扩展的Skill在skills目录下通过子目录管理，每个skill必须有一个md文件说明skill技能。

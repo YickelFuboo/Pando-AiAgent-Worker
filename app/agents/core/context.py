@@ -12,8 +12,11 @@ from ..skills.manager import SkillsManager
 from ..memorys.manager import MemoryManager
 
 
-# Agent目录下会被读入 system prompt 的引导文件名（按顺序，存在则读）
+# Agent 目录下引导文件所在子目录（.agent/agent_type/prompt）
+AGENT_CONTEXT_PATH = "prompt"
+# 会被读入 system prompt 的引导文件名（按顺序，存在则读）
 AGENT_CONTEXT_FILES = ["AGENT.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "RUNTIME.md"]
+
 
 class ContextBuilder:
 
@@ -41,12 +44,12 @@ class ContextBuilder:
             "workspace_path": str(Path(self.cur_workspace_path).expanduser().resolve()),
         })  
 
-        # 1. 构造Agent类型对应的引导文件
-        agent_dir = Path(self.cur_agent_path)
+        # 1. 构造Agent类型对应的引导文件（从 .agent/agent_type/prompt 目录读）
+        agent_prompt_dir = Path(self.cur_agent_path) / AGENT_CONTEXT_PATH
         for filename in AGENT_CONTEXT_FILES:
-            file = agent_dir / filename
+            file = agent_prompt_dir / filename
             if file.exists():
-                content = get_prompt_template(str(agent_dir), filename, self.params)
+                content = get_prompt_template(str(agent_prompt_dir), filename, self.params)
                 if content:
                     parts.append(f"{content}")
 

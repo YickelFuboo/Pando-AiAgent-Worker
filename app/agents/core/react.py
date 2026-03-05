@@ -1,13 +1,15 @@
 import json
-from abc import ABC
-from typing import List, Dict, Any, Optional, Literal, Tuple
-from enum import Enum
 import logging
 import re
+from abc import ABC
+from contextlib import AsyncExitStack
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple
+from enum import Enum
+from app.agents.core.base import AGENT_DIR, AgentState, BaseAgent
 from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
-from app.agents.core.base import BaseAgent, AgentState
 from app.agents.sessions.message import Role, Message, ToolCall, Function
 from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
@@ -16,6 +18,9 @@ from app.agents.tools.local.dir_operator import ListDirTool
 from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.web import WebSearchTool, WebFetchTool
 from app.agents.tools.local.terminate import Terminate
+
+# MCP 配置：.agent/{agent_type}/mcp/mcp_servers.json
+MCP_SERVERS_FILENAME = "mcp/mcp_servers.json"
 
 
 class ToolChoice(str, Enum):
@@ -76,7 +81,9 @@ class ReActAgent(BaseAgent):
         self.available_tools = ToolsFactory()
         self.tool_choices = ToolChoice.AUTO
         self.special_tool_names = []
-        self._register_default_tools()
+        self._register_tools()
+        # MCP连接
+        self._mcp_connect_stack: Optional[AsyncExitStack] = None
 
     def reset(self):
         """重置 agent 状态到初始状态
@@ -84,10 +91,18 @@ class ReActAgent(BaseAgent):
         """
         super().reset()
         self.tool_choices = ToolChoice.AUTO
-        self.special_tool_names = None
         logging.info(f"ReActAgent state reset to IDLE")
 
-    def _register_default_tools(self) -> None:
+    async def clear(self) -> None:
+        """清理资源"""
+        if self._mcp_connect_stack is not None:
+            try:
+                await self._mcp_connect_stack.aclose()
+            except Exception:
+                pass
+            self._mcp_connect_stack = None
+
+    def _register_tools(self) -> None:
         # 如果没有指定工具，则注册默认工具
         if self.available_tools:
             self.available_tools.register_tools(
@@ -101,6 +116,37 @@ class ReActAgent(BaseAgent):
             )
         # 登记特殊工具
         self.special_tool_names = [Terminate().name]
+
+    async def _connect_mcp(self) -> None:
+        """从 .agent/{agent_type}/mcp/mcp_servers.json 加载配置，连接 MCP 服务并将工具注册到 available_tools。"""
+        if self._mcp_connect_stack is not None:
+            return
+        
+        config_path = AGENT_DIR / self.agent_type / MCP_SERVERS_FILENAME
+        if not config_path.is_file():
+            return
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logging.warning("Failed to load MCP config %s: %s", config_path, e)
+            return
+        
+        servers = raw.get("mcp_servers") or []
+        if not servers:
+            return        
+        try:
+            from app.agents.tools.mcp.connector import MCPServerConnector
+            self._mcp_connect_stack = AsyncExitStack()
+            await self._mcp_connect_stack.__aenter__()
+            await MCPServerConnector.connect(servers, self.available_tools, self._mcp_connect_stack)
+        except Exception as e:
+            logging.error("Failed to connect MCP servers (will retry next run): %s", e)
+            if self._mcp_connect_stack:
+                try:
+                    await self._mcp_connect_stack.aclose()
+                except Exception:
+                    pass
+                self._mcp_connect_stack = None
 
     def _strip_think(text: str | None) -> str | None:
         """去掉回复中的 <think>...</think> 块（部分思考模型会内嵌），避免把思考过程当正文返回。"""
@@ -137,11 +183,11 @@ class ReActAgent(BaseAgent):
 
             # 设置运行状态
             self.state = AgentState.RUNNING
-            logging.info(f"Agent state set to RUNNING")
+            await self._connect_mcp()
+            logging.info(f"Agent {self.agent_name} state set to RUNNING")
 
             # 设置添加用户消息到history标志
             had_push_user_message = False
-            
             while (self.current_step < self.max_steps and self.state != AgentState.FINISHED):
                 self.current_step += 1
                 logging.info(f"Executing step {self.current_step}/{self.max_steps}")
@@ -175,12 +221,17 @@ class ReActAgent(BaseAgent):
             # 统一重置状态
             self.reset()
             return content
-            
         except Exception as e:
-            # 发生错误时设置错误状态
             self.state = AgentState.ERROR
             await self.push_history_message_and_notify_user(Message.assistant_message(f"Error in agent execution: {str(e)}"))
-            raise e
+            raise
+        finally:
+            # 记忆合并
+            await self.memory_manager.consolidate_memory()
+            # 会话历史记录落盘
+            await SESSION_MANAGER.save_session(self.session.session_id)
+            await self.clear()
+
 
     async def think(self, llm: Any, question: str) -> Tuple[str, bool]:
         """Think about the question"""
