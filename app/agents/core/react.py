@@ -19,6 +19,7 @@ from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.web import WebSearchTool, WebFetchTool
 from app.agents.tools.local.terminate import Terminate
 
+
 # MCP 配置：.agent/{agent_type}/mcp/mcp_servers.json
 MCP_SERVERS_FILENAME = "mcp/mcp_servers.json"
 
