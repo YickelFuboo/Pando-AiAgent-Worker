@@ -131,7 +131,7 @@ class BaseAgent(ABC):
 
     async def is_stuck(self) -> bool:
         """Check if the agent is stuck in a loop by detecting duplicate content"""
-        history = await self.get_history_messages(self.session.session_id)
+        history = await self.get_history_messages(self.session_id)
         if len(history) < 2:
             return False
 

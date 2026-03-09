@@ -4,10 +4,11 @@ import asyncio
 import logging
 from .scheme import WebSocketMessage
 
+
 class WebSocketManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
-    
+
     async def connect(self, client_id: str, websocket: WebSocket):
         """建立新的WebSocket连接"""
         logging.info(f"WebSocket connecting: {client_id}")
@@ -45,7 +46,7 @@ class WebSocketManager:
             return True
         except Exception as e:
             logging.info(f"Connection check failed for {client_id}: {str(e)}")
-            self.disconnect(client_id)
+            await self.disconnect(client_id)
             return False   
          
     async def send_message(self, client_id: str, message: WebSocketMessage):
@@ -58,7 +59,7 @@ class WebSocketManager:
                 logging.info(f"Message sent successfully")
             except Exception as e:
                 logging.info(f"Error sending message: {str(e)}")
-                self.disconnect(client_id)
+                await self.disconnect(client_id)
         else:
             raise Exception(f"No active connection for {client_id}")
 

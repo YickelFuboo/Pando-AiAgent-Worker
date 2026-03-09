@@ -11,6 +11,7 @@ class WebSocketMessageType(Enum):
     DISCONNECT = "disconnect"
     # 处理通知
     RESPONSE = "response"
+    ERROR = "error"
 
 class WebSocketMessage:
     """websocket消息"""

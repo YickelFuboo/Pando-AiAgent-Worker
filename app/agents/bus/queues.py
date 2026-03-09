@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict
@@ -76,17 +77,39 @@ class MessageBus:
         return self.outbound.qsize()
 
     async def run(self) -> None:
-        """Run the message bus."""
+        """Run the message bus：inbound 与 outbound 两路循环并发执行。"""
+        await asyncio.gather(self._run_inbound_loop(), self._run_outbound_loop())
+
+    async def _run_inbound_loop(self) -> None:
+        """循环消费 inbound，处理并产生 outbound。单条处理异常不影响总线。"""
         while True:
             inbound_msg = await self.pop_inbound()
-            if inbound_msg:
+            if not inbound_msg:
+                continue
+            try:
                 await self._process_message(inbound_msg)
+            except Exception as e:
+                logging.exception("MessageBus process inbound failed: %s", e)
+                try:
+                    await self.push_outbound(OutboundMessage(
+                        channel_type=inbound_msg.channel_type,
+                        channel_id=inbound_msg.channel_id,
+                        user_id=inbound_msg.user_id,
+                        session_id=inbound_msg.session_id,
+                        content=f"Error: {e!s}",
+                    ))
+                except Exception as push_err:
+                    logging.warning("Failed to push error outbound: %s", push_err)
 
+    async def _run_outbound_loop(self) -> None:
+        """循环消费 outbound，按 channel_type 回调发送。"""
+        while True:
             outbound_msg = await self.pop_outbound()
-            if outbound_msg:
-                callback = CHANNEL_OUTBOUND_CALLBACKS.get(outbound_msg.channel_type)
-                if callback:
-                    callback(outbound_msg)
+            callback = CHANNEL_OUTBOUND_CALLBACKS.get(outbound_msg.channel_type)
+            if callback:
+                callback(outbound_msg)
+            else:
+                logging.warning("No outbound callback for channel_type=%s", outbound_msg.channel_type)
 
     async def _process_message(self, inbound_msg: InboundMessage) -> None:
         """Process an inbound message."""

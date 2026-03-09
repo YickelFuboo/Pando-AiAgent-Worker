@@ -10,6 +10,10 @@ from .scheme import WebSocketMessage, WebSocketMessageType
 
 router = APIRouter()
 
+HEARTBEAT_INTERVAL_SEC = 30
+PONG_RESPONSE = {"type": "pong"}
+# 心跳由 Web 侧驱动：客户端按需发 {"type":"ping"}，服务端仅回 {"type":"pong"}；receive 超时 2*HEARTBEAT_INTERVAL_SEC 断链（无任何消息则断开）
+
 
 # 采用websocket模式连接前后端
 @router.websocket("/{agent_type}/{session_id}")
@@ -26,7 +30,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
         if not agent_type:
             raise HTTPException(status_code=400, detail="Agent type is required")
 
-        # 建立websocket连接
         await WEBSOCKET_MANAGER.connect(client_id=session_id, websocket=websocket)
 
         # 发送连接成功消息
@@ -41,16 +44,19 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
             
         try:
             while True:
-                data = await websocket.receive_text()
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=HEARTBEAT_INTERVAL_SEC * 2)
                 try:
                     parsed = json.loads(data)
-                    content = parsed.get("content", data)
-                    llm_provider = parsed.get("llm_provider", "")
-                    llm_model = parsed.get("llm_model", "")
                 except json.JSONDecodeError:
-                    content = data
-                    llm_provider = ""
-                    llm_model = ""
+                    parsed = {"content": data}
+
+                if parsed.get("type") == "ping":
+                    await websocket.send_json(PONG_RESPONSE)
+                    continue
+                
+                content = parsed.get("content", data)
+                llm_provider = parsed.get("llm_provider", "")
+                llm_model = parsed.get("llm_model", "")
                 inbound_msg = InboundMessage(
                     channel_type="websocket",
                     channel_id=session_id,
@@ -65,14 +71,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
         except WebSocketDisconnect:
             logging.info(f"WebSocket client disconnected: {session_id}")
         except asyncio.TimeoutError:
-            logging.error(f"Agent process timeout for session {session_id}")
-            await WEBSOCKET_MANAGER.send_message(
-                client_id=session_id,
-                message=WebSocketMessage(
-                    message_type=WebSocketMessageType.ERROR,
-                    current_session_id=session_id,
-                    content="Process timeout after 5 minutes")
-            )
+            logging.info(f"WebSocket idle timeout for session {session_id}, client should send ping within {HEARTBEAT_INTERVAL_SEC * 2}s")
         except Exception as e:
             logging.error(f"Error in agent process: {str(e)}")
             await WEBSOCKET_MANAGER.send_message(
@@ -86,15 +85,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
     except Exception as e:
         logging.error(f"WebSocket connection error: {str(e)}")
     finally:
-        # 确保连接被正确关闭
-        if session_id in WEBSOCKET_MANAGER.active_connections:
-            WEBSOCKET_MANAGER.disconnect(session_id)
+        if session_id and session_id in WEBSOCKET_MANAGER.active_connections:
+            await WEBSOCKET_MANAGER.disconnect(session_id)
             logging.info(f"WebSocket disconnected: {session_id}")
 
 def _on_websocket_outbound(msg: OutboundMessage) -> None:
-    """向对端发送消息的回调，供 MESSAGE_BUS 使用"""
+    """向对端发送消息的回调，供 MESSAGE_BUS 使用。断链后无法主动推送，需客户端重连。"""
 
     async def _send():
+        if msg.session_id not in WEBSOCKET_MANAGER.active_connections:
+            logging.warning("WebSocket outbound skipped: session %s not connected", msg.session_id)
+            return
         try:
             await WEBSOCKET_MANAGER.send_message(
                 client_id=msg.session_id,
@@ -105,7 +106,7 @@ def _on_websocket_outbound(msg: OutboundMessage) -> None:
                 ),
             )
         except Exception as e:
-            logging.error(f"WebSocket send outbound failed: {e}")
+            logging.error("WebSocket send outbound failed: %s", e)
 
     asyncio.create_task(_send())
 
