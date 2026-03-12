@@ -1,5 +1,5 @@
 """
-技能以「目录名/SKILL.md」形式存在，来源有两处：工作区 workspace/skills 与内置 ./skills。
+技能以「目录名/SKILL.md」形式存在，来源有两处：agent_type/skills 与内置 ./skills。
 支持 frontmatter 中的 description、metadata（pando/openclaw 格式：requires.bins/env、always）。
 常驻技能（always=true）全文进 system prompt，其余仅进摘要，由 Agent 用 read_file 按需加载。
 """
@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 from pathlib import Path
-from app.agents.sessions.session import Session
 
 
 SKILLS_DIR = "skills"
@@ -19,26 +18,17 @@ class SkillsManager:
     技能加载器：从工作区与内置目录列举/读取 SKILL.md，为 ContextBuilder 提供
     常驻技能全文与全体技能摘要（按需加载时 Agent 用 read_file 读 path）。
     """
-    def __init__(self, cur_agent_path: str, cur_workspace_path: str):      
+    def __init__(self, cur_agent_path: str):      
         self.builtin_skills_dir = Path(Path(__file__).parent)
         self.agent_skills_dir = Path(cur_agent_path) / SKILLS_DIR  # Agent特有的Skills
-        self.workspace_skills_dir = Path(cur_workspace_path) / SKILLS_DIR  # 用户工作区技能，同名覆盖 builtin
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
-        列举所有技能。先扫 workspace/skills，再扫内置 skills，同名只保留 workspace。
-        返回 [{"name", "path", "source": "workspace"|"builtin"}, ...]。
+        列举所有技能。先扫 agent_type/skills，再扫内置 skills，同名只保留 agent_type。
+        返回 [{"name", "path", "source": "agent_type"|"builtin"}, ...]。
         filter_unavailable=True 时排除 requires（bins/env）未满足的技能。
         """
         skills = []
-
-        if self.workspace_skills_dir and self.workspace_skills_dir.exists():
-            for skill_dir in self.workspace_skills_dir.iterdir():
-                if skill_dir.is_dir():
-                    skill_file = skill_dir / "SKILL.md"
-                    if skill_file.exists():
-                        skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
-
         if self.agent_skills_dir and self.agent_skills_dir.exists():
             for skill_dir in self.agent_skills_dir.iterdir():
                 if skill_dir.is_dir():
@@ -59,11 +49,6 @@ class SkillsManager:
     
     def load_skill(self, name: str) -> str | None:
         """按技能名（目录名）读取 SKILL.md 全文，先查工作区再查内置，找不到返回 None。"""
-        if self.workspace_skills_dir:
-            workspace_skill = self.workspace_skills_dir / name / "SKILL.md"
-            if workspace_skill.exists():
-                return workspace_skill.read_text(encoding="utf-8")
-
         if self.agent_skills_dir:
             agent_skill = self.agent_skills_dir / name / "SKILL.md"
             if agent_skill.exists():

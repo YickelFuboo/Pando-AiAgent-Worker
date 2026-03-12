@@ -25,7 +25,7 @@ class AgentState(str, Enum):
 
 # 当前文件所在目录（各技能为子目录，如 memory/SKILL.md）
 AGENT_DIR = Path(PROJECT_BASE_DIR) / ".agent"
-WORKSPACE_DIR = Path(PROJECT_BASE_DIR) / ".workspace"
+WORKSPACE_DIR = Path(PROJECT_BASE_DIR) / "data" / ".workspace"
 
 class BaseAgent(ABC):
     """Base Agent class
@@ -36,29 +36,23 @@ class BaseAgent(ABC):
 
     def __init__(
         self,
-        agent_name: str,
-        agent_description: str,
         agent_type: str,
         channel_type: str,
         channel_id: str,
         session_id: str,
-        workspace_index: str,
-        user_id: Optional[str] = None,
+        user_id: str,
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
         next_step_prompt: Optional[str] = None,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         memory_window: Optional[int] = None,
         max_steps: Optional[int] = None,
         max_duplicate_steps: Optional[int] = None,
         **kwargs: Any,
     ):
         # 基本信息
-        self.agent_name = agent_name
-        self.agent_description = agent_description
         self.agent_type = agent_type
 
         # 客户端信息
@@ -67,7 +61,6 @@ class BaseAgent(ABC):
 
         # 会话与用户
         self.session_id = session_id
-        self.workspace_index = workspace_index
         self.user_id = user_id
 
         # 提示词信息
@@ -79,7 +72,6 @@ class BaseAgent(ABC):
         self.llm_provider = llm_provider or ""
         self.llm_model = llm_model or ""
         self.temperature = temperature or 0.7
-        self.max_tokens = max_tokens or 4096
         self.memory_window = memory_window or 100
 
         # 执行步数相关
@@ -88,12 +80,11 @@ class BaseAgent(ABC):
         self.max_steps = max_steps or 50
         self.max_duplicate_steps = max_duplicate_steps or 2   # 最大重复次数，用于检验当前项agent是否挂死
 
-        # 上下文构建器、记忆管理器、技能管理器        
-        cur_agent_path = str(AGENT_DIR / agent_type)
-        cur_workspace_path = str(WORKSPACE_DIR / workspace_index)
-        self.context_builder = ContextBuilder(self.session_id, cur_agent_path, cur_workspace_path, kwargs)
-        self.memory_manager = MemoryManager(self.session_id, cur_agent_path, cur_workspace_path)
-        self.skills_manager = SkillsManager(cur_agent_path, cur_workspace_path)
+        # Agent 目录与工作空间路径
+        self.agent_path = str(AGENT_DIR / agent_type)
+        workspace_path = str(WORKSPACE_DIR / self.user_id / self.agent_type)
+        self.context_builder = ContextBuilder(self.session_id, self.agent_path, workspace_path, kwargs)
+        self.memory_manager = MemoryManager(self.session_id, self.agent_path, workspace_path)
 
     def reset(self):
         """重置 agent 状态到初始状态
@@ -105,7 +96,6 @@ class BaseAgent(ABC):
         try:
             self.state = AgentState.IDLE
             self.current_step = 0
-            logging.info(f"Agent state reset to IDLE")
         except Exception as e:
             logging.error(f"Error in agent reset: {str(e)}")
             raise e

@@ -2,6 +2,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 from app.domains.cron import CRON_MANAGER, CronKind, CronPayload, CronSchedule
+from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.schemes import ToolResult, ToolSuccessResult, ToolErrorResult
 
@@ -12,14 +13,10 @@ class CronTool(BaseTool):
     def __init__(
         self,
         *,
-        channel_type: str = "",
-        channel_id: str = "",
         session_id: str = "",
         user_id: str = "",
     ):
         self._cron = CRON_MANAGER
-        self._channel_type = channel_type or "cron"
-        self._channel_id = channel_id or ""
         self._session_id = session_id or ""
         self._user_id = user_id or ""
 
@@ -128,6 +125,9 @@ class CronTool(BaseTool):
                 return ToolErrorResult(f"Unknown timezone: {tz!r}")
         if not self._session_id:
             return ToolErrorResult("No session context (session_id) for add")
+        session = await SESSION_MANAGER.get_session(self._session_id)
+        if not session:
+            return ToolErrorResult("Session not found")
 
         delete_after = False
         if every_seconds is not None and every_seconds > 0:
@@ -147,13 +147,19 @@ class CronTool(BaseTool):
 
         payload_kind = CronKind.AGENT if kind == "agent" else CronKind.REMIND
         need_deliver = payload_kind == CronKind.REMIND
+        deliver_channel_type = session.channel_type or "cron"
+        deliver_to = self._user_id or ""
+        if not deliver_to:
+            if session.metadata and isinstance(session.metadata, dict):
+                deliver_to = str(session.metadata.get("channel_id") or "")
+        deliver_to = deliver_to or session.user_id or "cron"
         payload = CronPayload(
             kind=payload_kind,
             message=message,
             trigger_session_id=self._session_id,
             need_deliver=need_deliver,
-            deliver_to=self._user_id or self._channel_id,
-            deliver_channel_type=self._channel_type,
+            deliver_to=deliver_to,
+            deliver_channel_type=deliver_channel_type,
             agent_type=agent_type if kind == "agent" else None,
         )
         job = await self._cron.add_job(

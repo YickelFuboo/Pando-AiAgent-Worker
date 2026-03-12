@@ -16,12 +16,11 @@ from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, Rele
 from app.agents.tools.local.dir_operator import ListDirTool
 from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.web import WebSearchTool, WebFetchTool
-from app.agents.tools.local.terminate import Terminate
 from app.agents.tools.local.cron import CronTool
 
 
-# MCP 配置：.agent/{agent_type}/mcp/mcp_servers.json
-MCP_SERVERS_FILENAME = "mcp/mcp_servers.json"
+# MCP 配置：.agent/{agent_type}/mcp_servers.json
+MCP_SERVERS_FILENAME = "mcp_servers.json"
 
 
 class ToolChoice(str, Enum):
@@ -36,34 +35,27 @@ class ReActAgent(BaseAgent):
 
     def __init__(
         self,
-        agent_name: str,
-        agent_description: str,
         agent_type: str,
         channel_type: str,
         channel_id: str,
         session_id: str,
-        workspace_index: str,
-        user_id: Optional[str] = None,
+        user_id: str,
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
         next_step_prompt: Optional[str] = None,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         memory_window: Optional[int] = None,
         max_steps: Optional[int] = None,
         max_duplicate_steps: Optional[int] = None,
         **kwargs: Any,
     ):
         super().__init__(
-            agent_name=agent_name,
-            agent_description=agent_description,
             agent_type=agent_type,
             channel_type=channel_type,
             channel_id=channel_id,
             session_id=session_id,
-            workspace_index=workspace_index,
             user_id=user_id,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -71,7 +63,6 @@ class ReActAgent(BaseAgent):
             llm_provider=llm_provider,
             llm_model=llm_model,
             temperature=temperature,
-            max_tokens=max_tokens,
             memory_window=memory_window,
             max_steps=max_steps,
             max_duplicate_steps=max_duplicate_steps,
@@ -81,7 +72,6 @@ class ReActAgent(BaseAgent):
         # 工具信息
         self.available_tools = ToolsFactory()
         self.tool_choices = ToolChoice.AUTO
-        self.special_tool_names = []
         self._register_tools()
         # MCP连接
         self._mcp_connect_stack: Optional[AsyncExitStack] = None
@@ -91,7 +81,6 @@ class ReActAgent(BaseAgent):
         - 工具调用状态清空
         """
         super().reset()
-        self.tool_choices = ToolChoice.AUTO
         logging.info(f"ReActAgent state reset to IDLE")
 
     async def clear(self) -> None:
@@ -102,27 +91,6 @@ class ReActAgent(BaseAgent):
             except Exception:
                 pass
             self._mcp_connect_stack = None
-
-    def _register_tools(self) -> None:
-        # 如果没有指定工具，则注册默认工具
-        if self.available_tools:
-            self.available_tools.register_tools(
-                ReadFileTool(),
-                WriteFileTool(),
-                ReleaseFileTextTool(),
-                InsertFileTool(),
-                ListDirTool(),
-                ExecTool(),
-                CronTool(
-                    channel_type=self.channel_type,
-                    channel_id=self.channel_id,
-                    session_id=self.session_id,
-                    user_id=self.user_id or "",
-                ),
-                #Terminate(),
-            )
-        # 登记特殊工具
-        self.special_tool_names = [Terminate().name]
 
     async def _connect_mcp(self) -> None:
         """从 .agent/{agent_type}/mcp/mcp_servers.json 加载配置，连接 MCP 服务并将工具注册到 available_tools。"""
@@ -201,7 +169,7 @@ class ReActAgent(BaseAgent):
 
                 # 模型思考和工具调度
                 content, tool_calls = await self.think(llm, question)
-                if not tool_calls or self._has_special_tool(tool_calls):
+                if not tool_calls:
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(question))
                         had_push_user_message = True
@@ -253,7 +221,6 @@ class ReActAgent(BaseAgent):
                     user_question=question,
                     history=history,
                     temperature=self.temperature,
-                    max_tokens=self.max_tokens
                 )
                 if not response.success:
                     raise Exception(response.content)
@@ -267,7 +234,6 @@ class ReActAgent(BaseAgent):
                     tools=self.available_tools.to_params(),
                     tool_choice=self.tool_choices.value,
                     temperature=self.temperature,
-                    max_tokens=self.max_tokens
                 )
                 
                 # 处理工具调用
@@ -332,13 +298,6 @@ class ReActAgent(BaseAgent):
         except Exception as e:
             logging.error(f"Tool({name}) execution error: {str(e)}")
             raise RuntimeError(f"Tool({name}) execution error: {str(e)}") 
-
-    def _has_special_tool(self, tool_calls: Optional[List[ToolCall]]) -> bool:
-        """检查 tool_calls 中是否包含特殊工具"""
-        if not self.special_tool_names or not tool_calls:
-            return False
-        special = [n.lower() for n in self.special_tool_names]
-        return any(tc.function.name.lower() in special for tc in tool_calls)
 
     def get_available_tools(self) -> List[str]:
         """Get available tools list

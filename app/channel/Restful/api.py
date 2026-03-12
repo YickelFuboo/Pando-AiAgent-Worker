@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException
 import logging
+from fastapi import APIRouter, HTTPException
 from app.channel.schemes import UserRequest, UserResponse
 from app.agents.core.react import ReActAgent
 from app.agents.sessions.manager import SESSION_MANAGER
@@ -18,11 +18,14 @@ async def chat(request: UserRequest):
         session = await SESSION_MANAGER.get_session(request.session_id)
         if not session:
             raise HTTPException(status_code=400, detail="Session not found")
+        await SESSION_MANAGER.update_session(
+            request.session_id,
+            channel_type="Restful",
+            metadata={"channel_id": request.session_id},
+        )
 
         agent = ReActAgent(
             agent_type="chat_agent",
-            channel_type="Restful",
-            channel_id=request.session_id,
             session_id=request.session_id, 
             workspace_index=request.session_id,
             user_id=request.user_id,
