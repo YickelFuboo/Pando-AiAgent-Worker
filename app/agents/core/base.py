@@ -1,18 +1,11 @@
-import json
 import logging
 from abc import ABC
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
-from app.agents.core.context import ContextBuilder
-from app.agents.memorys.manager import MemoryManager
+from typing import Any, Dict, List, Optional
 from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.sessions.message import Role, Message
-from app.agents.skills.manager import SkillsManager
-from app.agents.tools.base import BaseTool
-from app.agents.tools.factory import ToolsFactory
 from app.config.settings import PROJECT_BASE_DIR
-from app.infrastructure.llms.chat_models.factory import llm_factory
 
 
 class AgentState(str, Enum):
@@ -74,6 +67,8 @@ class BaseAgent(ABC):
         self.temperature = temperature or 0.7
         self.memory_window = memory_window or 100
 
+        self.params = kwargs
+
         # 执行步数相关
         self.state = AgentState.IDLE
         self.current_step = 0
@@ -82,9 +77,7 @@ class BaseAgent(ABC):
 
         # Agent 目录与工作空间路径
         self.agent_path = str(AGENT_DIR / agent_type)
-        workspace_path = str(WORKSPACE_DIR / self.user_id / self.agent_type)
-        self.context_builder = ContextBuilder(self.session_id, self.agent_path, workspace_path, kwargs)
-        self.memory_manager = MemoryManager(self.session_id, self.agent_path, workspace_path)
+        self.workspace_path = str(WORKSPACE_DIR / self.user_id / self.agent_type)
 
     def reset(self):
         """重置 agent 状态到初始状态

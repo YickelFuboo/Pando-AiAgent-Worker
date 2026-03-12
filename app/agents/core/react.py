@@ -11,6 +11,8 @@ from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.message import Role, Message, ToolCall, Function
 from app.infrastructure.llms.chat_models.factory import llm_factory
+from app.agents.core.context import ContextBuilder
+from app.agents.memorys.manager import MemoryManager
 from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, ReleaseFileTextTool, InsertFileTool
 from app.agents.tools.local.dir_operator import ListDirTool
 from app.agents.tools.local.shell import ExecTool
@@ -118,7 +120,7 @@ class ReActAgent(BaseAgent):
         if tools_to_register:
             self.available_tools.register_tools(*tools_to_register)
 
-    async def _mcp_connect_and_register(self) -> None:
+    async def _register_mcp_tools(self) -> None:
         """从 .agent/{agent_type}/mcp_servers.json 加载配置，经连接池获取/复用 MCP，并将工具注册到 available_tools。"""
         if self._mcp_registered:
             return
@@ -172,8 +174,9 @@ class ReActAgent(BaseAgent):
             llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
 
             # 构建系统提示词和用户提示词，仅当返回有效值时才覆盖默认值
-            self.system_prompt = await self.context_builder.build_system_prompt() or self.system_prompt
-            question = await self.context_builder.build_user_content(question)
+            context_builder = ContextBuilder(self.session_id, self.agent_path, self.workspace_path, self.params)
+            self.system_prompt = await context_builder.build_system_prompt() or self.system_prompt
+            question = await context_builder.build_user_content(question)
 
             # 设置运行状态
             self.state = AgentState.RUNNING
@@ -221,8 +224,8 @@ class ReActAgent(BaseAgent):
             raise
         finally:
             # 记忆合并
-            await self.memory_manager.consolidate_memory()
-            await self.clear()
+            memory_manager = MemoryManager(self.session_id, self.agent_path, self.workspace_path)
+            await memory_manager.consolidate_memory()
 
 
     async def think(self, llm: Any, question: str) -> Tuple[str, bool]:
