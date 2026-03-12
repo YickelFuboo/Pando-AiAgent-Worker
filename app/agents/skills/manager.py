@@ -18,9 +18,9 @@ class SkillsManager:
     技能加载器：从工作区与内置目录列举/读取 SKILL.md，为 ContextBuilder 提供
     常驻技能全文与全体技能摘要（按需加载时 Agent 用 read_file 读 path）。
     """
-    def __init__(self, cur_agent_path: str):      
+    def __init__(self, agent_path: str):      
         self.builtin_skills_dir = Path(Path(__file__).parent)
-        self.agent_skills_dir = Path(cur_agent_path) / SKILLS_DIR  # Agent特有的Skills
+        self.agent_skills_dir = Path(agent_path) / SKILLS_DIR  # Agent特有的Skills
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """

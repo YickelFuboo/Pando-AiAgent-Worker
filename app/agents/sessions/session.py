@@ -20,7 +20,6 @@ class Session(BaseModel):
     # 会话历史信息
     messages: List[Message] = Field(default_factory=list)  # 历史会话记录
     last_consolidated: int = 0  # 已经合并到压缩结果的消息数量
-    memory: str = ""  # 当前会话记忆，Markdown 文档字符串
 
     created_at: datetime = Field(default_factory=datetime.now)
     last_updated: datetime = Field(default_factory=datetime.now)
@@ -29,7 +28,6 @@ class Session(BaseModel):
         """清空会话历史。"""
         self.messages.clear()
         self.last_consolidated = 0
-        self.memory = ""
         self.last_updated = datetime.now()
     
     def to_context(self, max_messages: int = 500) -> List[Dict[str, Any]]:
@@ -66,7 +64,6 @@ class Session(BaseModel):
             "metadata": self.metadata,
             "messages": [msg.model_dump() for msg in self.messages],
             "last_consolidated": self.last_consolidated,
-            "memory": self.memory,
             "created_at": self.created_at.isoformat(),
             "last_updated": self.last_updated.isoformat(),
         }

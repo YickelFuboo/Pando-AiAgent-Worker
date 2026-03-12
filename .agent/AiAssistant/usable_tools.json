@@ -2,6 +2,8 @@
   "usable_tools":[
     "read_file",
     "write_file",
+    "release_file_text",
+    "insert_file",
     "list_dir",
     "exec",
     "web_search",

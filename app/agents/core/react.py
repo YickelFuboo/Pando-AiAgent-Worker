@@ -1,15 +1,12 @@
 import json
 import logging
 import re
-from abc import ABC
-from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, List, Literal, Optional, Tuple
 from enum import Enum
 from app.agents.core.base import AGENT_DIR, AgentState, BaseAgent
-from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
-from app.agents.sessions.message import Role, Message, ToolCall, Function
+from app.agents.sessions.message import Message, ToolCall, Function
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
@@ -158,11 +155,9 @@ class ReActAgent(BaseAgent):
             
         Returns:
             str: Execution result
-        """        
-        logging.info(f"Running agent {self.agent_name} with question: {question}")
-
-        if not self.session_id or not self.workspace_index:
-            raise ValueError("Session and workspace_index are required")
+        """       
+        if not self.session_id:
+            raise ValueError("Session ID is required")
         
         # 检查并重置状态
         if self.state != AgentState.IDLE:
@@ -170,24 +165,24 @@ class ReActAgent(BaseAgent):
             self.reset()
         
         try:
-            # 获取模型实例
             llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
-
-            # 构建系统提示词和用户提示词，仅当返回有效值时才覆盖默认值
             context_builder = ContextBuilder(self.session_id, self.agent_path, self.workspace_path, self.params)
+            memory_manager = MemoryManager(self.session_id, self.workspace_path)
+
+            # 构建提示词
             self.system_prompt = await context_builder.build_system_prompt() or self.system_prompt
             question = await context_builder.build_user_content(question)
 
+            # 连接并注册 MCP 工具
+            await self._register_mcp_tools()
+
             # 设置运行状态
             self.state = AgentState.RUNNING
-            await self._register_mcp_tools()
-            logging.info(f"Agent {self.agent_name} state set to RUNNING")
 
             # 设置添加用户消息到history标志
             had_push_user_message = False
             while (self.current_step < self.max_steps and self.state != AgentState.FINISHED):
                 self.current_step += 1
-                logging.info(f"Executing step {self.current_step}/{self.max_steps}")
 
                 # 模型思考和工具调度
                 content, tool_calls = await self.think(llm, question)
@@ -215,16 +210,14 @@ class ReActAgent(BaseAgent):
             if self.current_step >= self.max_steps:
                 content += f"\n\n Terminated: Reached max steps ({self.max_steps})"
      
-            # 统一重置状态
-            self.reset()
             return content
         except Exception as e:
             self.state = AgentState.ERROR
             await self.push_history_message_and_notify_user(Message.assistant_message(f"Error in agent execution: {str(e)}"))
             raise
         finally:
-            # 记忆合并
-            memory_manager = MemoryManager(self.session_id, self.agent_path, self.workspace_path)
+            self.reset()
+            # 记忆提取
             await memory_manager.consolidate_memory()
 
 
@@ -247,7 +240,6 @@ class ReActAgent(BaseAgent):
                 if not response.success:
                     raise Exception(response.content)
             else:
-                # Get response with tool options
                 response, token_count = await llm.ask_tools(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
@@ -260,7 +252,6 @@ class ReActAgent(BaseAgent):
                 
                 # 处理工具调用
                 if response.tool_calls:
-                    # 处理工具调用列表
                     for i, tool_info in enumerate(response.tool_calls):
                         tool_call = ToolCall(
                             id=tool_info.id,
@@ -270,10 +261,6 @@ class ReActAgent(BaseAgent):
                             )
                         )
                         tool_calls.append(tool_call)
-
-                # 结果信息打印
-                logging.info(f"{self.agent_name}'s thoughts: {response.content} (Token count: {token_count})")
-                logging.info(f"{self.agent_name} selected {len(tool_calls)} tools to use")
 
                 if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
@@ -288,13 +275,9 @@ class ReActAgent(BaseAgent):
         """Execute tool calls and handle their results"""
         try:
             for toolcall in tool_calls:
-                # 执行工具
                 result = await self.execute_tool(toolcall)  
-                await self.push_history_message_and_notify_user(Message.tool_result_message(
-                    result, toolcall.function.name, toolcall.id)
-                )
-                logging.info(f"Tool '{toolcall.function.name}' completed! Result: {result}")
-        
+                await self.push_history_message_and_notify_user(Message.tool_result_message(result, toolcall.function.name, toolcall.id))
+
         except Exception as e:
             logging.error(f"Error in {self.agent_name}'s act process: {str(e)}")
             raise RuntimeError(str(e))
@@ -309,7 +292,6 @@ class ReActAgent(BaseAgent):
             raise ValueError(f"Unknown tool '{name}'")
             
         try:
-            # Parse arguments
             args = json.loads(toolcall.function.arguments or "{}")
             tool_result = await self.available_tools.execute(tool_name=name, tool_params=args)
             return f"{tool_result.result}"

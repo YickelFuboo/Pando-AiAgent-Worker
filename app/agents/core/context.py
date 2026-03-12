@@ -19,13 +19,13 @@ AGENT_CONTEXT_FILES = ["AGENT.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.m
 
 class ContextBuilder:
 
-    def __init__(self, session_id: str, cur_agent_path: str, cur_workspace_path: str, params: Optional[dict[str, Any]] = None):
+    def __init__(self, session_id: str, agent_path: str, workspace_path: str, params: Optional[dict[str, Any]] = None):
         self.session_id = session_id
-        self.cur_agent_path = cur_agent_path
-        self.cur_workspace_path = cur_workspace_path
+        self.agent_path = agent_path
+        self.workspace_path = workspace_path
         self.params = dict(params) if params else {}
-        self.skills_manager = SkillsManager(cur_agent_path, cur_workspace_path)
-        self.memory_manager = MemoryManager(session_id, cur_agent_path, cur_workspace_path)
+        self.skills_manager = SkillsManager(agent_path)
+        self.memory_manager = MemoryManager(session_id, workspace_path)
     
     async def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """
@@ -40,11 +40,11 @@ class ContextBuilder:
 
         self.params.update({
             "runtime": runtime,
-            "workspace_path": str(Path(self.cur_workspace_path).expanduser().resolve()),
+            "workspace_path": str(Path(self.workspace_path).expanduser().resolve()),
         })  
 
         # 1. 构造Agent类型对应的引导文件（从 .agent/agent_type/prompt 目录读）
-        agent_prompt_dir = Path(self.cur_agent_path) / AGENT_CONTEXT_PATH
+        agent_prompt_dir = Path(self.agent_path) / AGENT_CONTEXT_PATH
         for filename in AGENT_CONTEXT_FILES:
             file = agent_prompt_dir / filename
             if file.exists():
@@ -53,7 +53,7 @@ class ContextBuilder:
                     parts.append(f"{content}")
 
         # 2. 长期记忆：组合三层记忆（会话/工作空间/Agent 类型）
-        memory = await self.memory_manager.append_all_memory_context()
+        memory = await self.memory_manager.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -75,18 +75,6 @@ Skills with available="false" need dependencies installed first - you can try in
 
         # 用分隔符连接各段，避免挤在一起
         return "\n\n---\n\n".join(parts)
-    
-    def _load_bootstrap_files(self) -> str:
-        """从工作区按 WORKSPACE_CONTEXT_FILES 顺序读取存在的文件，拼成 ## 文件名 + 内容，不存在则跳过。"""
-        parts = []
-
-        for filename in AGENT_CONTEXT_FILES:
-            file = Path(self.cur_workspace_path) / filename
-            if file.exists():
-                content = file.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
-
-        return "\n\n".join(parts) if parts else ""
     
     async def build_user_content(
         self,

@@ -18,7 +18,6 @@ class SessionRecord(Base):
     metadata_ = Column("metadata", JSON, nullable=True, comment="元数据 JSON")
     messages = Column(JSON, nullable=False, comment="消息列表 JSON")
     last_consolidated = Column(Integer, nullable=False, server_default="0", comment="已合并消息数")
-    memory = Column(Text, nullable=True, comment="会话记忆，Markdown 文档字符串")
 
     created_at = Column(DateTime, nullable=False, server_default=func.now(), comment="创建时间")
     last_updated = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now(), comment="最后更新时间")

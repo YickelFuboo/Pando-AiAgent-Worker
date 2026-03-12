@@ -3,8 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
-from app.agents.sessions.manager import SESSION_MANAGER
-from app.agents.core.react import ReActAgent
 
 
 @dataclass
@@ -170,6 +168,9 @@ class MessageBus:
 
     async def _handle_inbound(self, inbound_msg: InboundMessage) -> None:
         """处理单条 inbound：更新 session 信息 + 复用/创建 agent 串行执行。"""
+        from app.agents.sessions.manager import SESSION_MANAGER
+        from app.agents.core.react import ReActAgent
+
         session_id = inbound_msg.session_id
         if not session_id:
            raise ValueError("Session ID is required")

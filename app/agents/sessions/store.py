@@ -149,7 +149,6 @@ def _row_to_session(row) -> Session:
         meta = {}
     llm_provider = getattr(row, "llm_provider", None) or ""
     last_consolidated = getattr(row, "last_consolidated", 0) or 0
-    memory = getattr(row, "memory", None) or ""
     agent_type = getattr(row, "agent_type", None) or getattr(row, "session_type", "") or ""
     channel_type = getattr(row, "channel_type", None) or ""
     return Session(
@@ -163,7 +162,6 @@ def _row_to_session(row) -> Session:
         messages=messages,
         metadata=meta,
         last_consolidated=last_consolidated,
-        memory=memory,
         created_at=row.created_at,
         last_updated=row.last_updated,
     )
@@ -204,7 +202,6 @@ class DatabaseSessionStore(SessionStore):
                     rec.metadata_ = session.metadata
                     rec.messages = messages_json
                     rec.last_consolidated = session.last_consolidated
-                    rec.memory = session.memory or ""
                     rec.last_updated = session.last_updated
                 else:
                     db.add(SessionRecord(
@@ -218,7 +215,6 @@ class DatabaseSessionStore(SessionStore):
                         metadata_=session.metadata,
                         messages=messages_json,
                         last_consolidated=session.last_consolidated,
-                        memory=session.memory or "",
                         created_at=session.created_at,
                         last_updated=session.last_updated,
                     ))
