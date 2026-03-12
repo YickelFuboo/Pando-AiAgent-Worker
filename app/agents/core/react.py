@@ -177,7 +177,7 @@ class ReActAgent(BaseAgent):
 
             # 设置运行状态
             self.state = AgentState.RUNNING
-            #await self._connect_mcp()
+            await self._register_mcp_tools()
             logging.info(f"Agent {self.agent_name} state set to RUNNING")
 
             # 设置添加用户消息到history标志
