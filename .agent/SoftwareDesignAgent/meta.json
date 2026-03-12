@@ -1,6 +1,6 @@
 {
-  "name_zh": "AI助手",
-  "name_en": "AI Assistant",
-  "description_zh": "智能对话与任务执行助手，支持代码编辑、文件操作、检索与定时任务。",
-  "description_en": "Intelligent conversation and task execution assistant with code, file, search and cron support."
+  "name_zh": "软件设计助手",
+  "name_en": "Software Design Agent",
+  "description_zh": "面向软件架构与设计的智能助手，支持需求分析、技术方案、接口设计与文档产出。",
+  "description_en": "Intelligent assistant for software architecture and design, with requirements analysis, technical design, API design and documentation."
 }

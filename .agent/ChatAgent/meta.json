@@ -1,6 +1,6 @@
 {
-  "name_zh": "AI助手",
-  "name_en": "AI Assistant",
-  "description_zh": "智能对话与任务执行助手，支持代码编辑、文件操作、检索与定时任务。",
-  "description_en": "Intelligent conversation and task execution assistant with code, file, search and cron support."
+  "name_zh": "聊天助手",
+  "name_en": "Chat Agent",
+  "description_zh": "面向日常对话与问答的智能助手，支持多轮对话、信息检索与自然交流。",
+  "description_en": "Intelligent assistant for daily conversation and Q&A, with multi-turn dialogue, search and natural interaction."
 }

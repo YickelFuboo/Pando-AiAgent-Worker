@@ -1,6 +1,6 @@
 {
-  "name_zh": "AI助手",
-  "name_en": "AI Assistant",
-  "description_zh": "智能对话与任务执行助手，支持代码编辑、文件操作、检索与定时任务。",
-  "description_en": "Intelligent conversation and task execution assistant with code, file, search and cron support."
+  "name_zh": "编程助手",
+  "name_en": "Coding Agent",
+  "description_zh": "面向代码编写与开发的智能助手，支持读写文件、执行命令、代码补全与问题排查。",
+  "description_en": "Intelligent assistant for coding and development, with file read/write, command execution, code completion and debugging."
 }
