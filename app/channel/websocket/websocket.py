@@ -4,11 +4,12 @@ import logging
 from fastapi import APIRouter, WebSocket, HTTPException
 from starlette.websockets import WebSocketDisconnect
 from app.agents.bus.queues import CHANNEL_OUTBOUND_CALLBACKS, MESSAGE_BUS, InboundMessage, OutboundMessage
-from .manager import WEBSOCKET_MANAGER
-from .scheme import WebSocketMessage, WebSocketMessageType
+from .manager import WEBSOCKET_MANAGER, WebSocketMessage, WebSocketMessageType
+from app.channel.schemes import UserRequest
+from app.agents.sessions.manager import SESSION_MANAGER
 
 
-router = APIRouter()
+router = APIRouter(prefix="/websocket")
 
 HEARTBEAT_INTERVAL_SEC = 30
 PONG_RESPONSE = {"type": "pong"}
@@ -16,7 +17,7 @@ PONG_RESPONSE = {"type": "pong"}
 
 
 # 采用websocket模式连接前后端
-@router.websocket("/{agent_type}/{session_id}")
+@router.websocket("/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
     """WebSocket 连接端点""" 
     try:
@@ -25,10 +26,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
         if not session_id:
             raise HTTPException(status_code=400, detail="Session ID is required")
 
-        # 处理请求处理
-        agent_type = websocket.path_params.get("agent_type")
-        if not agent_type:
-            raise HTTPException(status_code=400, detail="Agent type is required")
+        session = await SESSION_MANAGER.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=400, detail="Session not found")
 
         await WEBSOCKET_MANAGER.connect(client_id=session_id, websocket=websocket)
 
@@ -37,7 +37,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
             client_id=session_id,
             message=WebSocketMessage(
                 message_type=WebSocketMessageType.CONNECT_SUCCESS,
-                current_session_id=session_id,
+                session_id=session_id,
                 content="Session Connected"
             )
         )
@@ -53,19 +53,25 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
                 if parsed.get("type") == "ping":
                     await websocket.send_json(PONG_RESPONSE)
                     continue
-                
-                content = parsed.get("content", data)
-                llm_provider = parsed.get("llm_provider", "")
-                llm_model = parsed.get("llm_model", "")
+                try:
+                    payload = UserRequest(
+                        content=parsed.get("content", data),
+                        user_id=parsed.get("user_id"),
+                        agent_type=parsed.get("agent_type"),
+                        llm_provider=parsed.get("llm_provider"),
+                        llm_model=parsed.get("llm_model"),
+                    )
+                except Exception:
+                    payload = UserRequest(content=parsed.get("content", data))
                 inbound_msg = InboundMessage(
                     channel_type="websocket",
                     channel_id=session_id,
-                    user_id=session_id,
+                    user_id=payload.user_id or session.user_id,
                     session_id=session_id,
-                    agent_type=agent_type,
-                    content=content,
-                    llm_provider=llm_provider,
-                    llm_model=llm_model,
+                    agent_type=payload.agent_type or session.agent_type,
+                    content=payload.content,
+                    llm_provider=payload.llm_provider if payload.llm_provider is not None else (session.llm_provider or ""),
+                    llm_model=payload.llm_model if payload.llm_model is not None else (session.llm_model or ""),
                 )
                 await MESSAGE_BUS.push_inbound(inbound_msg)
         except WebSocketDisconnect:
@@ -74,13 +80,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
             logging.info(f"WebSocket idle timeout for session {session_id}, client should send ping within {HEARTBEAT_INTERVAL_SEC * 2}s")
         except Exception as e:
             logging.error(f"Error in agent process: {str(e)}")
-            await WEBSOCKET_MANAGER.send_message(
-                client_id=session_id,
-                message=WebSocketMessage(
-                    message_type=WebSocketMessageType.ERROR,
-                    current_session_id=session_id,
-                    content=f"Error: {str(e)}")
-            )
+            try:
+                await WEBSOCKET_MANAGER.send_message(
+                    client_id=session_id,
+                    message=WebSocketMessage(
+                        message_type=WebSocketMessageType.ERROR,
+                        session_id=session_id,
+                        content=f"Error: {str(e)}"),
+                )
+            except Exception as send_err:
+                logging.error(f"Could not send error to client (connection may be closed): {send_err}")
             
     except Exception as e:
         logging.error(f"WebSocket connection error: {str(e)}")
@@ -101,7 +110,7 @@ def _on_websocket_outbound(msg: OutboundMessage) -> None:
                 client_id=msg.session_id,
                 message=WebSocketMessage(
                     message_type=WebSocketMessageType.RESPONSE,
-                    current_session_id=msg.session_id,
+                    session_id=msg.session_id,
                     content=msg.content,
                 ),
             )

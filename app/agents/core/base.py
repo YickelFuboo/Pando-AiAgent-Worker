@@ -8,7 +8,6 @@ from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
 from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.sessions.message import Role, Message
-from app.agents.sessions.session import Session
 from app.agents.skills.manager import SkillsManager
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
@@ -131,7 +130,7 @@ class BaseAgent(ABC):
 
     async def is_stuck(self) -> bool:
         """Check if the agent is stuck in a loop by detecting duplicate content"""
-        history = await self.get_history_messages(self.session_id)
+        history = await self.get_history_messages()
         if len(history) < 2:
             return False
 

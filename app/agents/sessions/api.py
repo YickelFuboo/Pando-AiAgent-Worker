@@ -1,8 +1,8 @@
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException
 from .message import Message
 from .manager import SESSION_MANAGER
-from .schemes import SessionCreate, SessionInfo, UserMessage
+from .schemes import SessionCreate, SessionUpdateRequest, SessionInfo, UserMessage
 
 
 # 主路由
@@ -68,27 +68,25 @@ async def get_session_messages(session_id: str):
     return [UserMessage(**msg.to_user_message()) for msg in messages]
 
 @router.put(
-    "/metadata/{session_id}",
-    summary="更新会话元数据",
-    description="更新指定会话的元数据",
+    "/update/{session_id}",
+    summary="更新会话",
+    description="更新指定会话的 Agent 类型、模型信息或元数据，仅传需要修改的字段；metadata 与现有合并",
+    response_model=SessionInfo,
     responses={200: {"description": "Successfully updated"}, 404: {"description": "Session not found"}},
 )
-async def update_metadata(
-    session_id: str,
-    metadata: Dict[str, Any] = Body(
-        example={"title": "会话标题", "source": "web"},
-        description="会话元数据，任意键值对",
-    ),
-):
-    """更新会话元数据"""
+async def update_session(session_id: str, body: SessionUpdateRequest):
+    """更新会话的 Agent 类型、模型信息或元数据。"""
     session = await SESSION_MANAGER.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    for key, value in metadata.items():
-        session.set_metadata(key, value)
-    await SESSION_MANAGER.save_session(session_id)
-    return {"status": "success"}
-
+    await SESSION_MANAGER.update_session(
+        session_id, 
+        agent_type=body.agent_type,
+        llm_provider=body.llm_provider,
+        llm_model=body.llm_model,
+        metadata=body.metadata,
+    )
+    return SessionInfo(**session.to_information())
 
 @router.delete(
     "/{session_id}",

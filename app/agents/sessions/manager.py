@@ -21,10 +21,10 @@ class SessionManager:
 
     async def create_session(
         self,
-        agent_type: str,
-        channel_type: str = "",
         user_id: str = "anonymous",
-        description: str = "",
+        agent_type: Optional[str] = None,
+        channel_type: Optional[str] = None,
+        description: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None
@@ -38,19 +38,33 @@ class SessionManager:
             user_id=user_id,
             description=description,
             agent_type=agent_type,
-            channel_type=channel_type,
+            channel_type=channel_type or "",
             llm_provider=llm_provider or "",
             llm_model=llm_model or "",
+            metadata=metadata or {},
         )
-        if metadata:
-            for key, value in metadata.items():
-                session.set_metadata(key, value)
-
         self.sessions[session_id] = session
         await self._store.save(session)
 
         logging.info("Created session: %s", session_id)
         return session_id
+
+    async def update_session(self, session_id: str, description: Optional[str] = None, agent_type: Optional[str] = None, channel_type: Optional[str] = None, llm_provider: Optional[str] = None, llm_model: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        """更新会话"""
+        session = await self.get_session(session_id)
+        if not session:
+            return False        
+        session.description = description or session.description
+        session.agent_type = agent_type or session.agent_type
+        session.channel_type = channel_type or session.channel_type
+        session.llm_provider = llm_provider or session.llm_provider
+        session.llm_model = llm_model or session.llm_model
+        if metadata:
+            for key, value in metadata.items():
+                session.metadata.update({key: value})
+        session.last_updated = datetime.now()
+        await self._store.save(session)
+        return True
 
     async def add_message(self, session_id: str, message: Message) -> bool:
         """添加消息到会话"""
@@ -58,7 +72,8 @@ class SessionManager:
         if not session:
             return False
         try:
-            session.add_message(message)
+            session.messages.append(message)
+            session.last_updated = datetime.now()
             await self._store.save(session)
             return True
         except Exception as e:
@@ -70,14 +85,14 @@ class SessionManager:
         session = await self.get_session(session_id)
         if not session:
             return []
-        return session.get_messages()
+        return session.messages or []
 
     async def get_context(self, session_id: str, max_messages: int = 500) -> List[Dict[str, Any]]:
         """获取会话上下文（未合并消息），供 LLM 使用。"""
         session = await self.get_session(session_id)
         if not session:
             return []
-        return session.get_context(max_messages=max_messages)
+        return session.to_context(max_messages=max_messages)
 
     async def get_all_sessions(
         self,

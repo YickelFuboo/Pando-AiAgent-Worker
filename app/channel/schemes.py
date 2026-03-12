@@ -1,15 +1,14 @@
 from pydantic import BaseModel
-from enum import Enum
 from typing import Optional
 
 class UserRequest(BaseModel):
     """用户请求"""
     session_id: str
     user_id: str
-    user_question: str
-    agent_type: str = "default"
-    llm_provider: Optional[str] = ""
-    llm_model: Optional[str] = ""
+    content: str
+    agent_type: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
 
 class UserResponse(BaseModel):
     """用户响应"""

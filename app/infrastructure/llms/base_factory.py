@@ -1,9 +1,15 @@
 import json
 import os
+import time
+import hashlib
+import threading
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from copy import copy
-from typing import Dict, Any, Optional, Type, TypeVar, Generic
+from typing import Dict, Any, Optional, Type, TypeVar, Generic, Tuple
 from app.config.settings import PROJECT_BASE_DIR
+
+DEFAULT_CACHE_TTL_SECONDS = 3600
 
 T = TypeVar('T')
 
@@ -19,13 +25,20 @@ class BaseModelFactory(ABC, Generic[T]):
     def __init__(self, config_filename: str):
         """
         初始化工厂类
-        
+
         Args:
             config_filename: 配置文件名称
         """
         self.config_path = os.path.join(PROJECT_BASE_DIR, "app", "config", config_filename)
         self._config = None
+        self._instance_cache_lock = threading.Lock()
+        self._instance_cache: OrderedDict = OrderedDict()
+        self._cache_ttl_seconds = DEFAULT_CACHE_TTL_SECONDS
         self.load_config()
+
+    def clear_instance_cache(self):
+        with self._instance_cache_lock:
+            self._instance_cache.clear()
     
     def load_config(self):
         """加载模型配置文件"""
@@ -247,6 +260,32 @@ class BaseModelFactory(ABC, Generic[T]):
         for key, value in model_para["model_params"].items():
             if key not in config:
                 config[key] = value
+
+        # 获取模型信息
+        api_key = api_key or model_para["api_key"] or ""
+        base_url = model_para["base_url"] or ""
+
+        # 计算缓存key（失败则跳过缓存）
+        cache_key = None
+        try:
+            api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16] if api_key else ""
+            config_key = json.dumps(config, ensure_ascii=False, sort_keys=True, default=str)
+            cache_key = (provider, model, language or "", base_url, api_key_hash, config_key)
+        except Exception:
+            cache_key = None
+
+        if cache_key is not None:
+            with self._instance_cache_lock:
+                entry = self._instance_cache.get(cache_key)
+                if entry is not None:
+                    instance, created_at = entry
+                    if self._cache_ttl_seconds is not None and created_at > 0:
+                        if time.time() - created_at > self._cache_ttl_seconds:
+                            del self._instance_cache[cache_key]
+                            entry = None
+                    if entry is not None:
+                        self._instance_cache.move_to_end(cache_key)
+                        return instance
         
         # 获取模型类
         model_class = self._models[provider]
@@ -254,10 +293,18 @@ class BaseModelFactory(ABC, Generic[T]):
             raise ValueError(f"未知的模型类: {provider}")
         
         # 创建模型实例
-        return model_class(
-            api_key = api_key or model_para["api_key"],
-            model_name = model,
-            base_url = model_para["base_url"],
-            language = language,
-            **kwargs
+        instance = model_class(
+            api_key=api_key,
+            model_name=model,
+            base_url=base_url,
+            language=language,
+            **config
         )
+
+        if cache_key is not None:
+            with self._instance_cache_lock:
+                created_at = time.time() if self._cache_ttl_seconds is not None else 0
+                self._instance_cache[cache_key] = (instance, created_at)
+                self._instance_cache.move_to_end(cache_key)
+
+        return instance

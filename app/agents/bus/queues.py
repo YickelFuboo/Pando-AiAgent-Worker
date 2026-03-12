@@ -3,7 +3,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict
-from app.agents.core.react import ReActAgent
 from app.agents.sessions.manager import SESSION_MANAGER
 
 
@@ -36,6 +35,7 @@ class OutboundMessage:
 
 ChannelOutboundCallback = Callable[[OutboundMessage], None]
 CHANNEL_OUTBOUND_CALLBACKS: Dict[str, ChannelOutboundCallback] = {}
+
 
 class MessageBus:
     def __init__(self):
@@ -113,6 +113,7 @@ class MessageBus:
 
     async def _process_message(self, inbound_msg: InboundMessage) -> None:
         """Process an inbound message."""
+        from app.agents.core.react import ReActAgent
         session_id = inbound_msg.session_id
         if not session_id:
            raise ValueError("Session ID is required")
@@ -120,6 +121,17 @@ class MessageBus:
         session = await SESSION_MANAGER.get_session(session_id)
         if not session:
             raise ValueError("Session not found")
+
+        # 检查并更新Session信息（入参带来的 agent_type/模型等与现有合并）
+        await SESSION_MANAGER.update_session(
+            session_id, 
+            description=session.description if session.description else inbound_msg.content[:20],
+            channel_type=inbound_msg.channel_type,
+            agent_type=inbound_msg.agent_type,
+            llm_provider=inbound_msg.llm_provider,
+            llm_model=inbound_msg.llm_model,
+            metadata=inbound_msg.metadata,
+        )
         
         agent = ReActAgent(
             agent_name="ReActAgent", 
@@ -135,17 +147,7 @@ class MessageBus:
         )
 
         # 运行Agent
-        result = await agent.run(inbound_msg.content)
-
-        # 发送最终相应消息
-        outbound_msg = OutboundMessage(
-            channel_type=inbound_msg.channel_type,
-            channel_id=inbound_msg.channel_id,
-            user_id=inbound_msg.user_id,
-            session_id=inbound_msg.session_id,
-            content=result,
-        )
-        await self.push_outbound(outbound_msg)
+        await agent.run(inbound_msg.content)
 
 
 MESSAGE_BUS = MessageBus()

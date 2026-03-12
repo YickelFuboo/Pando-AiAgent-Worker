@@ -1,9 +1,38 @@
 from fastapi import WebSocket
-from typing import Dict, Any
-import asyncio
+from typing import Dict
+from enum import Enum
 import logging
-from .scheme import WebSocketMessage
 
+
+class WebSocketMessageType(Enum):
+    """消息类型"""
+    # 连接成功
+    CONNECT_SUCCESS = "connect_success"
+    # 连接失败
+    CONNECT_ERROR = "connect_error"
+    # 断开连接
+    DISCONNECT = "disconnect"
+    # 处理通知
+    RESPONSE = "response"
+    ERROR = "error"
+
+class WebSocketMessage:
+    """WebSocket 下发给客户端的消息。"""
+    message_type: WebSocketMessageType
+    session_id: str
+    content: str
+
+    def __init__(self, message_type: WebSocketMessageType, session_id: str, content: str):
+        self.message_type = message_type
+        self.session_id = session_id
+        self.content = content
+
+    def to_dict(self):
+        return {
+            "message_type": self.message_type.value,
+            "session_id": self.session_id,
+            "content": self.content,
+        }
 
 class WebSocketManager:
     def __init__(self):
@@ -30,24 +59,6 @@ class WebSocketManager:
     def get_handler(self, client_id: str) -> WebSocket:
         """获取WebSocket处理器"""
         return self.active_connections.get(client_id)
-    
-    async def is_connected(self, client_id: str) -> bool:
-        """检查WebSocket连接是否还活着
-        
-        通过尝试发送ping消息来检查连接状态
-        """
-        if client_id not in self.active_connections:
-            return False
-            
-        try:
-            websocket = self.active_connections[client_id]
-            await websocket.send_text("ping")
-            await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-            return True
-        except Exception as e:
-            logging.info(f"Connection check failed for {client_id}: {str(e)}")
-            await self.disconnect(client_id)
-            return False   
          
     async def send_message(self, client_id: str, message: WebSocketMessage):
         """发送消息到客户端"""

@@ -19,8 +19,11 @@ from app.infrastructure.redis import REDIS_CONN
 from app.agents.bus.queues import MESSAGE_BUS
 from app.channel.websocket.websocket import router as websocket_router
 from app.domains.cron import CRON_MANAGER
+from app.agents.api import router as agents_router
 from app.agents.sessions.api import router as sessions_router
 from app.channel.Restful.api import router as restful_router
+from app.infrastructure.llms.api import router as llms_router
+
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -45,10 +48,12 @@ setup_logging()
 #==================================
 # 注册所有路由器
 #==================================
-#app.include_router(llms_router, prefix="/api/v1", tags=["模型管理"])
+app.include_router(llms_router, prefix="/api/v1", tags=["模型管理"])
+app.include_router(agents_router, prefix="/api/v1", tags=["Agent列表查询"])
 app.include_router(sessions_router, prefix="/api/v1", tags=["Agent 会话管理"])
-app.include_router(websocket_router, prefix="/api/v1", tags=["WebSocket"])
-app.include_router(restful_router, prefix="/api/v1", tags=["Restful"])
+app.include_router(websocket_router, prefix="/api/v1", tags=["WebSocket Channel"])
+app.include_router(restful_router, prefix="/api/v1", tags=["Restful Channel"])
+
 
 #==================================
 # 配置中间件

@@ -36,9 +36,9 @@ async def default_on_execute(job: CronJob) -> None:
         session_id = payload.trigger_session_id or f""
         if not session_id:
             session_id = await SESSION_MANAGER.create_session(
+                user_id=user_id,
                 agent_type=agent_type,
                 channel_type=channel_type,
-                user_id=user_id,
                 description=job.name or "cron",
             )
 

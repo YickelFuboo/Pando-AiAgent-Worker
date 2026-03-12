@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from app.infrastructure.llms.prompts.prompt_template_load import get_prompt_template
-from ..sessions.session import Session
 from ..skills.manager import SkillsManager
 from ..memorys.manager import MemoryManager
 

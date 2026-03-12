@@ -1,4 +1,5 @@
 import json
+import re
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Dict, Any, Union
@@ -47,6 +48,24 @@ class ToolCall(BaseModel):
             "function": self.function.model_dump()
         }
 
+def _strip_ansi(text: str) -> str:
+    """移除终端 ANSI 转义序列（颜色、样式等），避免在网页/非终端中显示为乱码。"""
+    if not text:
+        return text
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _looks_like_code(text: str) -> bool:
+    """粗略判断内容是否像代码（多行或含常见代码特征）。"""
+    if not text or not text.strip():
+        return False
+    t = text.strip()
+    if "\n" in t and t.count("\n") >= 1:
+        return True
+    code_marks = ("def ", "class ", "import ", "from ", "return ", "if __name__", "=>", "function ", "const ", "let ")
+    return any(m in t for m in code_marks)
+
+
 class Message(BaseModel):
     """聊天消息，兼容 OpenAI 风格。按用途分三种形态：
 
@@ -75,68 +94,6 @@ class Message(BaseModel):
     def is_assistant_tool_calls(self) -> bool:
         """是否为助手工具调用消息（role=assistant 且带 tool_calls）。"""
         return self.role == Role.ASSISTANT and bool(self.tool_calls)
-
-    def model_dump(self) -> Dict[str, Any]:
-        """自定义序列化方法，对外仍输出 name/tool_call_id 以兼容 API 与存储。"""
-        message = {"role": self.role.value}
-        if self.content is not None:
-            message["content"] = self.content
-        if self.tool_calls is not None:
-            message["tool_calls"] = [tool_call.model_dump() for tool_call in self.tool_calls]
-        if self.name is not None and self.tool_call_id is not None:
-            message["name"] = self.name
-            message["tool_call_id"] = self.tool_call_id
-        if self.create_time:
-            message["create_time"] = self.create_time.strftime("%Y-%m-%d %H:%M:%S")
-        return message
-
-    def to_context(self) -> Dict[str, Any]:
-        """提供给 LLM API 的消息格式，不包含 create_time。"""
-        message = {"role": self.role.value}
-        if self.content is not None:
-            message["content"] = self.content
-        if self.tool_calls is not None:
-            message["tool_calls"] = [tc.model_dump() for tc in self.tool_calls]
-        if self.name is not None and self.tool_call_id is not None:
-            message["name"] = self.name
-            message["tool_call_id"] = self.tool_call_id
-        return message
-
-    def to_json(self) -> str:
-        """将消息转换为JSON字符串"""
-        return json.dumps(self.model_dump(), ensure_ascii=False)
-
-    def to_user_message(self) -> Dict[str, Any]:
-        """将消息转换易于用户阅读的消息格式"""
-        message = {'role': self.role.value}
-
-        # 添加内容
-        content = ""
-        if self.tool_calls:
-            if self.content:
-                content = self.content
-                content += "\n\n"
-            # 添加toolcall信息，格式：工具执行：web_search("北京天气")，other_tool("arg")
-            content += "工具执行："
-            parts = []
-            for tool_call in self.tool_calls:
-                args_dict = json.loads(tool_call.function.arguments or "{}")
-                args_str = ", ".join(
-                    f'"{v}"' if isinstance(v, str) else str(v)
-                    for v in args_dict.values()
-                )
-                parts.append(f"{tool_call.function.name}({args_str})")
-            content += "，".join(parts)
-        elif self.name and self.tool_call_id:
-            content = f"  工具{self.name}执行结果：\n\n{self.content}"
-        else:
-            content = self.content
-        message['content'] = content
-
-        # 添加创建时间
-        message['create_time'] = self.create_time.strftime("%Y-%m-%d %H:%M:%S")
-        
-        return message
 
     @classmethod
     def system_message(cls, content: str) -> "Message":
@@ -174,3 +131,88 @@ class Message(BaseModel):
             tool_call_id=tool_call_id,
             create_time=datetime.now(),
         )
+
+    def to_json(self) -> str:
+        """将消息转换为JSON字符串"""
+        return json.dumps(self.model_dump(), ensure_ascii=False)
+    
+    def model_dump(self) -> Dict[str, Any]:
+        """自定义序列化方法，对外仍输出 name/tool_call_id 以兼容 API 与存储。"""
+        message = {"role": self.role.value}
+        if self.content is not None:
+            message["content"] = self.content
+        if self.tool_calls is not None:
+            message["tool_calls"] = [tool_call.model_dump() for tool_call in self.tool_calls]
+        if self.name is not None and self.tool_call_id is not None:
+            message["name"] = self.name
+            message["tool_call_id"] = self.tool_call_id
+        if self.create_time:
+            message["create_time"] = self.create_time.strftime("%Y-%m-%d %H:%M:%S")
+        return message
+
+    def to_context(self) -> Dict[str, Any]:
+        """提供给 LLM API 的消息格式，不包含 create_time。"""
+        message = {"role": self.role.value}
+        if self.content is not None:
+            message["content"] = self.content
+        if self.tool_calls is not None:
+            message["tool_calls"] = [tc.model_dump() for tc in self.tool_calls]
+        if self.name is not None and self.tool_call_id is not None:
+            message["name"] = self.name
+            message["tool_call_id"] = self.tool_call_id
+        return message    
+
+    def to_user_message(self) -> Dict[str, Any]:
+        """将消息转换为易于用户阅读的格式，工具调用/工具结果以 MD 呈现。"""
+        message = {"role": self.role.value}
+        if self.is_assistant_tool_calls:
+            content = self._tool_calls_to_md()
+        elif self.is_tool_result:
+            content = self._tool_result_to_md()
+        else:
+            content = self.content or ""
+        message["content"] = content
+        message["create_time"] = (self.create_time or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+        return message
+
+    def _tool_calls_to_md(self) -> str:
+        """将助手工具调用消息转为 MD。"""
+        lines = []
+        if self.content and self.content.strip():
+            lines.append(self.content.strip())
+            lines.append("")
+        for tool_call in self.tool_calls or []:
+            lines.append(tool_call.function.name + " executing：")
+            args_raw = (tool_call.function.arguments or "").strip()
+            try:
+                args_obj = json.loads(args_raw) if args_raw else {}
+                args_pretty = json.dumps(args_obj, ensure_ascii=False, indent=2)
+                lines.append("```json")
+                lines.append(args_pretty)
+                lines.append("```")
+            except (json.JSONDecodeError, TypeError):
+                lines.append("```")
+                lines.append(args_raw or "No arguments")
+                lines.append("```")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    def _tool_result_to_md(self) -> str:
+        """将工具执行结果消息转为 MD。"""
+        lines = [(self.name or "") + " result： "]
+        raw = _strip_ansi((self.content or "").strip())
+        try:
+            obj = json.loads(raw)
+            lines.append("```json")
+            lines.append(json.dumps(obj, ensure_ascii=False, indent=2))
+            lines.append("```")
+        except (json.JSONDecodeError, TypeError):
+            if _looks_like_code(raw):
+                lines.append("```")
+                lines.append(raw)
+                lines.append("```")
+            else:
+                lines.append("```text")
+                lines.append(raw or "(无)")
+                lines.append("```")
+        return "\n".join(lines)

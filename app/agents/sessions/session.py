@@ -25,6 +25,34 @@ class Session(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     last_updated: datetime = Field(default_factory=datetime.now)
 
+    def clear(self) -> None:
+        """清空会话历史。"""
+        self.messages.clear()
+        self.last_consolidated = 0
+        self.memory = ""
+        self.last_updated = datetime.now()
+    
+    def to_context(self, max_messages: int = 500) -> List[Dict[str, Any]]:
+        """返回未合并到压缩结果的消息，按照用户回合对齐。"""
+        unconsolidated = self.messages[self.last_consolidated:]
+        sliced = unconsolidated[-max_messages:]
+        return [s.to_context() for s in sliced]
+
+    def to_information(self) -> Dict[str, Any]:
+        """会话关键信息，供 API 列表等使用。"""
+        return {
+            "session_id": self.session_id,
+            "agent_type": self.agent_type,
+            "channel_type": self.channel_type,
+            "user_id": self.user_id,
+            "created_at": self.created_at,
+            "last_updated": self.last_updated,
+            "description": self.description,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
+            "metadata": self.metadata,
+        }
+
     def model_dump(self) -> Dict[str, Any]:
         """序列化。"""
         return {
@@ -42,46 +70,3 @@ class Session(BaseModel):
             "created_at": self.created_at.isoformat(),
             "last_updated": self.last_updated.isoformat(),
         }
-
-    def add_message(self, message: Message) -> None:
-        """追加一条消息，不执行压缩。需压缩时由调用方使用 context_compressor.get_context_for_llm。"""
-        self.messages.append(message)
-        self.last_updated = datetime.now()
-
-    def get_messages(self) -> List[Message]:
-        """返回会话消息列表。"""
-        return self.messages
-
-    def get_context(self, max_messages: int = 500) -> List[Dict[str, Any]]:
-        """返回未合并到压缩结果的消息，按照用户回合对齐。"""
-        unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
-        return [s.to_context() for s in sliced]
-
-    def clear(self) -> None:
-        """清空会话历史。"""
-        self.messages.clear()
-        self.last_consolidated = 0
-        self.memory = ""
-        self.last_updated = datetime.now()
-
-    def to_information(self) -> Dict[str, Any]:
-        """会话关键信息，供 API 列表等使用。"""
-        return {
-            "session_id": self.session_id,
-            "agent_type": self.agent_type,
-            "channel_type": self.channel_type,
-            "user_id": self.user_id,
-            "created_at": self.created_at,
-            "last_updated": self.last_updated,
-            "description": self.description,
-            "llm_provider": self.llm_provider,
-            "llm_model": self.llm_model,
-            "metadata": self.metadata,
-        }
-
-    def set_metadata(self, key: str, value: Any) -> None:
-        self.metadata[key] = value
-
-    def get_metadata(self, key: str, default: Any = None) -> Any:
-        return self.metadata.get(key, default)

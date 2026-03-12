@@ -104,11 +104,10 @@ class SQLConnection(AsyncBaseConnection):
                 raise RuntimeError("数据库引擎已创建但session_maker未初始化")
         
         session = self.session_maker()
-        try: 
+        try:
             yield session
-        except Exception as e:
+        except Exception:
             await session.rollback()
-            logging.error(f"获取数据库会话失败: {e}")
             raise
         finally:
             await session.close()

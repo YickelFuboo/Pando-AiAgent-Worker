@@ -11,7 +11,6 @@ from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.message import Role, Message, ToolCall, Function
-from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, ReleaseFileTextTool, InsertFileTool
 from app.agents.tools.local.dir_operator import ListDirTool
@@ -191,7 +190,7 @@ class ReActAgent(BaseAgent):
 
             # 设置运行状态
             self.state = AgentState.RUNNING
-            await self._connect_mcp()
+            #await self._connect_mcp()
             logging.info(f"Agent {self.agent_name} state set to RUNNING")
 
             # 设置添加用户消息到history标志
@@ -206,7 +205,7 @@ class ReActAgent(BaseAgent):
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(question))
                         had_push_user_message = True
-                    await self.push_history_message(Message.assistant_message(content))
+                    await self.push_history_message_and_notify_user(Message.assistant_message(content))
                     break
                 else:
                     if not had_push_user_message:
@@ -305,7 +304,7 @@ class ReActAgent(BaseAgent):
                 result = await self.execute_tool(toolcall)  
                 await self.push_history_message_and_notify_user(Message.tool_result_message(
                     result, toolcall.function.name, toolcall.id)
-                )            
+                )
                 logging.info(f"Tool '{toolcall.function.name}' completed! Result: {result}")
         
         except Exception as e:
