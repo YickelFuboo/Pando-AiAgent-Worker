@@ -133,11 +133,41 @@ class MessageBus:
         )
 
     async def _run_inbound_loop(self) -> None:
-        """循环消费 inbound：按 session_id 路由到 mailbox，由各 session worker 串行执行。"""
+        """循环消费 inbound：系统命令(/status、/stop)直接处理不排队；其余按 session 入 mailbox 串行执行。"""
         while True:
             inbound_msg = await self.pop_inbound()
             if not inbound_msg:
                 continue
+            
+            # 系统命令直接处理不排队
+            content_stripped = (inbound_msg.content or "").strip()
+            if content_stripped == "/status":
+                status_text = self._get_status_text()
+                await self.push_outbound(OutboundMessage(
+                    channel_type=inbound_msg.channel_type,
+                    channel_id=inbound_msg.channel_id,
+                    user_id=inbound_msg.user_id,
+                    session_id=inbound_msg.session_id,
+                    content=status_text,
+                ))
+                continue
+            if content_stripped == "/stop":
+                agent = self.running_agent_pool.get(inbound_msg.session_id)
+                if agent:
+                    agent.force_stop()
+                    reply = "已发送停止请求，当前任务将在当前步骤结束后停止。"
+                else:
+                    reply = "当前没有正在运行的 Agent。"
+                await self.push_outbound(OutboundMessage(
+                    channel_type=inbound_msg.channel_type,
+                    channel_id=inbound_msg.channel_id,
+                    user_id=inbound_msg.user_id,
+                    session_id=inbound_msg.session_id,
+                    content=reply,
+                ))
+                continue
+
+            # 处理Agent对话消息
             try:
                 await self._dispatch_inbound(inbound_msg)
             except Exception as e:
@@ -207,7 +237,7 @@ class MessageBus:
                     pass
 
     async def _handle_inbound(self, inbound_msg: InboundMessage) -> None:
-        """处理单条 inbound：/status、/stop 命令或更新 session + 复用/创建 agent 执行。"""
+        """处理单条 inbound：更新 session + 复用/创建 agent 执行（系统命令已在 _run_inbound_loop 直接处理，不进入此处）。"""
         from app.agents.sessions.manager import SESSION_MANAGER
         from app.agents.core.react import ReActAgent
 
@@ -215,37 +245,9 @@ class MessageBus:
         if not session_id:
             raise ValueError("Session ID is required")
 
-        content_stripped = (inbound_msg.content or "").strip()
-        if content_stripped == "/status":
-            status_text = self._get_status_text()
-            await self.push_outbound(OutboundMessage(
-                channel_type=inbound_msg.channel_type,
-                channel_id=inbound_msg.channel_id,
-                user_id=inbound_msg.user_id,
-                session_id=session_id,
-                content=status_text,
-            ))
-            return
-        if content_stripped == "/stop":
-            agent = self.running_agent_pool.get(session_id)
-            if agent:
-                agent.force_stop()
-                reply = "已发送停止请求，当前任务将在当前步骤结束后停止。"
-            else:
-                reply = "当前没有正在运行的 Agent。"
-            await self.push_outbound(OutboundMessage(
-                channel_type=inbound_msg.channel_type,
-                channel_id=inbound_msg.channel_id,
-                user_id=inbound_msg.user_id,
-                session_id=session_id,
-                content=reply,
-            ))
-            return
-
         session = await SESSION_MANAGER.get_session(session_id)
         if not session:
             raise ValueError("Session not found")
-
         metadata = dict(inbound_msg.metadata) if inbound_msg.metadata else {}
         await SESSION_MANAGER.update_session(
             session_id,
