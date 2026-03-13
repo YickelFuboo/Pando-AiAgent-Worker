@@ -185,6 +185,7 @@ class ReActAgent(BaseAgent):
         try:
             # 构建提示词
             self.system_prompt = await context_builder.build_system_prompt() or self.system_prompt
+            original_question = question
             question = await context_builder.build_user_content(question)
 
             # 连接并注册 MCP 工具
@@ -202,13 +203,13 @@ class ReActAgent(BaseAgent):
                 content, tool_calls = await self.think(llm, question)
                 if not tool_calls:
                     if not had_push_user_message:
-                        await self.push_history_message(Message.user_message(question))
+                        await self.push_history_message(Message.user_message(original_question))
                         had_push_user_message = True
                     await self.push_history_message_and_notify_user(Message.assistant_message(content))
                     break
                 else:
                     if not had_push_user_message:
-                        await self.push_history_message(Message.user_message(question))
+                        await self.push_history_message(Message.user_message(original_question))
                         had_push_user_message = True
                     await self.push_history_message_and_notify_user(Message.tool_call_message(content, tool_calls))    
                     await self.act(tool_calls)
