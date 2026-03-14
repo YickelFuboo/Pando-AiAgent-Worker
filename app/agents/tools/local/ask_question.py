@@ -21,7 +21,7 @@ Note: Do not use this tool unless necessary. You should strive to understand the
             "properties": {
                 "question": {
                     "type": "string",
-                    "description": "The question to ask the user."
+                    "description": "The question to ask the user. It should be a question that can be answered by the user to complete the task."
                 }
             },
             "required": ["question"]

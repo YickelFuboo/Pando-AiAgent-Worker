@@ -1,4 +1,5 @@
 import logging
+import re
 from abc import ABC
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,13 @@ class AgentState(str, Enum):
     WAITING = "WAITING"  # Waiting for user input
     ERROR = "ERROR"  # Error state
     FINISHED = "FINISHED"  # Finished state
+
+
+class ToolChoice(str, Enum):
+    """工具调用模式：none=不暴露工具，auto=由模型决定，required=必须调用工具。"""
+    NONE = "none"
+    AUTO = "auto"
+    REQUIRED = "required"
 
 
 class BaseAgent(ABC):
@@ -67,7 +75,7 @@ class BaseAgent(ABC):
         # 执行步数相关
         self._state = AgentState.IDLE
         self._current_step = 0
-        self._max_steps = max_steps or 50
+        self._max_steps = max_steps or 100
         self._max_duplicate_steps = max_duplicate_steps or 2   # 最大重复次数，用于检验当前项agent是否挂死
         self._stop_requested = False
 
@@ -90,14 +98,14 @@ class BaseAgent(ABC):
             logging.error(f"Error in agent reset: {str(e)}")
             raise e
 
-    async def run(self, question: str) -> str:
+    async def run(self, question: str) -> None:
         """Run the agent
         
         Args:
             question: Input question
             
         Returns:
-            str: Execution result
+            None
         """
         pass
  
@@ -134,6 +142,12 @@ class BaseAgent(ABC):
             AgentState: Current state
         """
         return self._state
+    
+    def _strip_think(self, text: str | None) -> str | None:
+        """去掉回复中的 <think>...</think> 块（部分思考模型会内嵌），避免把思考过程当正文返回。"""
+        if not text:
+            return None
+        return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
 
     async def get_history_messages(self) -> List[Message]:
         """Get messages from session"""

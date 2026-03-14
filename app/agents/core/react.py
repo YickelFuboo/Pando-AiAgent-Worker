@@ -6,19 +6,22 @@ from typing import Any, List, Literal, Optional, Tuple
 from enum import Enum
 from pathlib import Path
 from app.config.settings import PROJECT_BASE_DIR
-from app.agents.core.base import AgentState, BaseAgent
+from app.agents.core.base import AgentState, BaseAgent, ToolChoice
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.message import Message, ToolCall, Function
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
+from app.agents.core.subagent import SubAgentManager
 from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, ReleaseFileTextTool, InsertFileTool
 from app.agents.tools.local.dir_operator import ListDirTool
 from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.web import WebSearchTool, WebFetchTool
 from app.agents.tools.local.cron import CronTool
 from app.agents.tools.local.ask_question import AskQuestion
+from app.agents.tools.local.terminate import Terminate
+from app.agents.tools.local.spawn import SpawnTool
 
 
 # 当前文件所在目录（各技能为子目录，如 memory/SKILL.md）
@@ -28,13 +31,6 @@ WORKSPACE_DIR = Path(PROJECT_BASE_DIR) / "data" / ".workspace"
 # MCP 配置：.agent/{agent_type}/mcp_servers.json
 MCP_SERVERS_FILENAME = "mcp_servers.json"
 USABLE_TOOLS_FILENAME = "usable_tools.json"
-
-
-class ToolChoice(str, Enum):
-    """工具调用模式：none=不暴露工具，auto=由模型决定，required=必须调用工具。"""
-    NONE = "none"
-    AUTO = "auto"
-    REQUIRED = "required"
 
 
 class ReActAgent(BaseAgent):
@@ -76,19 +72,33 @@ class ReActAgent(BaseAgent):
             **kwargs,
         )
 
-        # 工具信息
-        self.available_tools = ToolsFactory()
-        self.tool_choices = ToolChoice.AUTO
-        self.special_tool_names: List[str] = ["ask_question"]
-        self._register_tools()
-        self._mcp_registered = False
-
         # 设置工作空间路径        
         self.agent_path = str(AGENT_DIR / agent_type)
         if agent_type == "AiAssistant":
             self.workspace_path = str(WORKSPACE_DIR / self.user_id / self.agent_type)
         else:
             self.workspace_path = str(WORKSPACE_DIR / "default")
+
+        # 子Agent管理器
+        self.subagent_manager = SubAgentManager(
+            user_id=user_id,
+            parent_agent_type=agent_type,
+            session_id=session_id,
+            channel_type=channel_type,
+            channel_id=channel_id,
+            workspace_path=self.workspace_path,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            temperature=self.temperature,
+        )
+
+        # 工具信息
+        self.available_tools = ToolsFactory()
+        self.tool_choices = ToolChoice.AUTO
+        self.special_tool_names: List[str] = ["ask_question", "terminate"]
+        self._register_tools()
+        self._mcp_registered = False
+
 
     def _register_tools(self) -> None:
         """根据 .agent/{agent_type}/usable_tools.json 注册工具，仅注册配置中列出的项。"""
@@ -107,6 +117,8 @@ class ReActAgent(BaseAgent):
         tools_to_register: List[BaseTool] = []
         if "ask_question" in usable:
             tools_to_register.append(AskQuestion())
+        if "terminate" in usable:
+            tools_to_register.append(Terminate())
         if "read_file" in usable:
             tools_to_register.append(ReadFileTool())
         if "write_file" in usable:
@@ -125,6 +137,9 @@ class ReActAgent(BaseAgent):
             tools_to_register.append(WebFetchTool())
         if "cron" in usable:
             tools_to_register.append(CronTool(session_id=self.session_id, user_id=self.user_id))
+        if "spawn" in usable:
+            tools_to_register.append(SpawnTool(self.subagent_manager))
+        
         if tools_to_register:
             self.available_tools.register_tools(*tools_to_register)
 
@@ -152,20 +167,14 @@ class ReActAgent(BaseAgent):
         except Exception as e:
             logging.error("Failed to connect MCP servers (will retry next run): %s", e)
 
-    def _strip_think(text: str | None) -> str | None:
-        """去掉回复中的 <think>...</think> 块（部分思考模型会内嵌），避免把思考过程当正文返回。"""
-        if not text:
-            return None
-        return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
-
-    async def run(self, question: str) -> str:
+    async def run(self, question: str) -> None:
         """Run the agent
         
         Args:
             question: Input question
             
         Returns:
-            str: Execution result
+            None
         """
         if not self.session_id:
             raise ValueError("Session ID is required")
@@ -175,21 +184,20 @@ class ReActAgent(BaseAgent):
             logging.warning(f"Agent is busy with state {self._state}, resetting...")
             self.reset()
         
+        # 设置运行状态
+        self._state = AgentState.RUNNING
 
         llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
         context_builder = ContextBuilder(self.session_id, self.agent_path, self.workspace_path, self.params)
         memory_manager = MemoryManager(self.session_id, self.workspace_path)
         try:
+            # 连接并注册 MCP 工具
+            await self._register_mcp_tools()
+
             # 构建提示词
             self.system_prompt = await context_builder.build_system_prompt() or self.system_prompt
             original_question = question
             question = await context_builder.build_user_content(question)
-
-            # 连接并注册 MCP 工具
-            await self._register_mcp_tools()
-
-            # 设置运行状态
-            self._state = AgentState.RUNNING
 
             # 设置添加用户消息到history标志
             had_push_user_message = False
@@ -203,7 +211,7 @@ class ReActAgent(BaseAgent):
                         await self.push_history_message(Message.user_message(original_question))
                         had_push_user_message = True
                     await self.push_history_message_and_notify_user(Message.assistant_message(content))
-                    break
+                    # break 等待AI明确退出工具信号，没有工具信息时候不退出
                 else:
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(original_question))
@@ -218,11 +226,10 @@ class ReActAgent(BaseAgent):
                 # 继续下一步
                 question = self.next_step_prompt
 
-            # 检查终止原因并重置状态
+            # 如果到最大步数未结束任务，则提示用户
             if self._current_step >= self._max_steps:
                 content += f"\n\n Terminated: Reached max steps ({self._max_steps})"
-     
-            return content
+                await self.push_history_message_and_notify_user(Message.assistant_message(content))
         except Exception as e:
             self._state = AgentState.ERROR
             await self.push_history_message_and_notify_user(Message.assistant_message(f"Error in agent execution: {str(e)}"))
@@ -332,7 +339,9 @@ class ReActAgent(BaseAgent):
         name = toolcall.function.name
         args = json.loads(toolcall.function.arguments or "{}")   
         if name == "ask_question":
-            await self.push_history_message_and_notify_user(Message.assistant_message(args.get("ask_question") or ""))
+            await self.push_history_message_and_notify_user(Message.assistant_message(args.get("question") or ""))
+        elif name == "terminate":
+            await self.push_history_message_and_notify_user(Message.assistant_message(args.get("summary") or ""))
 
-        self.state = AgentState.FINISHED
+        self._state = AgentState.FINISHED
         logging.info(f"Task completion or phased completion by special tool '{name}'")

@@ -1,6 +1,7 @@
 {
   "usable_tools":[
     "ask_question",
+    "terminate",
     "read_file",
     "write_file",
     "release_file_text",
@@ -9,6 +10,7 @@
     "exec",
     "web_search",
     "web_fetch",
-    "cron"
+    "cron",
+    "spawn"
   ]
 }

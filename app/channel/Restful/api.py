@@ -3,10 +3,14 @@ from fastapi import APIRouter, HTTPException
 from app.channel.schemes import UserRequest, UserResponse
 from app.agents.core.react import ReActAgent
 from app.agents.sessions.manager import SESSION_MANAGER
+from app.infrastructure.llms.base_factory import llm_factory
 
 
 router = APIRouter()
 
+
+SYSTEM_PROMPT = "You are a helpful assistant Pando, please give a detailed answer to the user's question."
+USER_PROMPT = ""
 
 @router.post("/chat", response_model=UserResponse)
 async def chat(request: UserRequest):
@@ -24,19 +28,18 @@ async def chat(request: UserRequest):
             metadata={"channel_id": request.session_id},
         )
 
-        agent = ReActAgent(
-            agent_type="chat_agent",
-            session_id=request.session_id, 
-            workspace_index=request.session_id,
-            user_id=request.user_id,
-            llm_provider=request.llm_provider,
-            llm_model=request.llm_model,
+        llm = llm_factory.create_model(provider=request.llm_provider, model=request.llm_model)
+        history = await SESSION_MANAGER.get_context(request.session_id, max_messages=20)
+        response, token_count = await llm.chat(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=USER_PROMPT,
+            user_question=request.user_question,
+            history=history,
+            temperature=0.7,
         )
-
-        # 运行Agent
-        result = await agent.run(request.user_question)
-
-        return UserResponse(session_id=request.session_id, content=result)
+        if not response.success:
+            raise Exception(response.content)
+        return UserResponse(session_id=request.session_id, content=response.content)
     except Exception as e:
         logging.error(f"Error in chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
