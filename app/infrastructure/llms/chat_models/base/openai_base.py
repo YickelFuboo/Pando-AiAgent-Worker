@@ -101,7 +101,7 @@ class OpenAIBase(LLM):
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in chat (attempt {attempt + 1}): {e}")
                     return ChatResponse(
-                        content=str(e),
+                        content="llm error: " + str(e),
                         success=False
                     ), 0
                 
@@ -111,7 +111,7 @@ class OpenAIBase(LLM):
                 await asyncio.sleep(delay)
         
         return ChatResponse(
-            content="Unexpected error: max retries exceeded",
+            content="llm error: Unexpected error: max retries exceeded",
             success=False
         ), 0
 
@@ -247,7 +247,7 @@ class OpenAIBase(LLM):
                 # 检查响应结构是否有效
                 if (not response.choices or not response.choices[0].message):
                     return AskToolResponse(
-                        content="Invalid response structure",
+                        content="llm error: Invalid response structure",
                         success=False
                     ), 0
                 
@@ -278,7 +278,7 @@ class OpenAIBase(LLM):
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in ask_tools (attempt {attempt + 1}): {e}")
                     return AskToolResponse(
-                        content=str(e),
+                        content="llm error: " + str(e),
                         success=False
                     ), 0
                 
@@ -288,7 +288,7 @@ class OpenAIBase(LLM):
                 await asyncio.sleep(delay)
         
         return AskToolResponse(
-            content="Unexpected error: max retries exceeded",
+            content="llm error: Unexpected error: max retries exceeded",
             success=False
         ), 0
 
@@ -304,7 +304,7 @@ class OpenAIBase(LLM):
                        **kwargs) -> Tuple[AsyncGenerator[str, None], int]:
         """OpenAI兼容的工具调用流式实现，支持失败重试"""
         if tool_choice == "required" and not tools:
-            return self._create_error_stream("tool_choice 为 'required' 时必须提供 tools"), 0
+            return self._create_error_stream("llm error: tool_choice 为 'required' 时必须提供 tools"), 0
         
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -327,7 +327,7 @@ class OpenAIBase(LLM):
                 
                 # 检查响应结构是否有效
                 if not response:
-                    return self._create_error_stream("Invalid response structure"), 0
+                    return self._create_error_stream("llm error: Invalid response structure"), 0
                 
                 total_tokens = 0
                 
@@ -404,11 +404,11 @@ class OpenAIBase(LLM):
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in ask_tools_stream (attempt {attempt + 1}): {e}")
-                    return self._create_error_stream(str(e)), 0
+                    return self._create_error_stream("llm error: " + str(e)), 0
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
                 logging.warning(f"Retryable error in ask_tools_stream (attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {delay:.2f}s...")
                 await asyncio.sleep(delay)
         
-        return self._create_error_stream("Unexpected error: max retries exceeded"), 0
+        return self._create_error_stream("llm error: Unexpected error: max retries exceeded"), 0

@@ -67,6 +67,7 @@ class BaseModelFactory(ABC, Generic[T]):
         """
         result = {}
         all_models = self._config.get("models", {})
+        
         for provider_name, provider_config in all_models.items():
             if provider_config.get("is_valid", 0) == 1:
                 provider_info = {
