@@ -18,6 +18,7 @@ from app.agents.tools.local.dir_operator import ListDirTool
 from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.web import WebSearchTool, WebFetchTool
 from app.agents.tools.local.cron import CronTool
+from app.agents.tools.local.ask_question import AskQuestion
 
 
 # 当前文件所在目录（各技能为子目录，如 memory/SKILL.md）
@@ -78,6 +79,7 @@ class ReActAgent(BaseAgent):
         # 工具信息
         self.available_tools = ToolsFactory()
         self.tool_choices = ToolChoice.AUTO
+        self.special_tool_names: List[str] = ["ask_question"]
         self._register_tools()
         self._mcp_registered = False
 
@@ -103,6 +105,8 @@ class ReActAgent(BaseAgent):
             return
         
         tools_to_register: List[BaseTool] = []
+        if "ask_question" in usable:
+            tools_to_register.append(AskQuestion())
         if "read_file" in usable:
             tools_to_register.append(ReadFileTool())
         if "write_file" in usable:
@@ -233,7 +237,6 @@ class ReActAgent(BaseAgent):
                     logging.warning("Memory consolidate_memory (background) failed: %s", e)
             asyncio.create_task(memory_manager.consolidate_memory()).add_done_callback(_on_consolidate_done)
 
-
     async def think(self, llm: Any, question: str) -> Tuple[str, bool]:
         """Think about the question"""
         # 获取当前会话历史
@@ -266,14 +269,15 @@ class ReActAgent(BaseAgent):
                 # 处理工具调用
                 if response.tool_calls:
                     for i, tool_info in enumerate(response.tool_calls):
-                        tool_call = ToolCall(
-                            id=tool_info.id,
-                            function=Function(
-                                name=tool_info.name,
-                                arguments=json.dumps(tool_info.args, ensure_ascii=False)
+                        if tool_info.name:
+                            tool_call = ToolCall(
+                                id=tool_info.id,
+                                function=Function(
+                                    name=tool_info.name,
+                                    arguments=json.dumps(tool_info.args, ensure_ascii=False)
+                                )
                             )
-                        )
-                        tool_calls.append(tool_call)
+                            tool_calls.append(tool_call)
 
                 if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
@@ -288,9 +292,11 @@ class ReActAgent(BaseAgent):
         """Execute tool calls and handle their results"""
         try:
             for toolcall in tool_calls:
-                result = await self.execute_tool(toolcall)  
-                await self.push_history_message_and_notify_user(Message.tool_result_message(result, toolcall.function.name, toolcall.id))
-
+                if self._is_special_tool(toolcall):
+                    await self._handle_special_tool(toolcall)
+                else:
+                    result = await self.execute_tool(toolcall)  
+                    await self.push_history_message_and_notify_user(Message.tool_result_message(result, toolcall.function.name, toolcall.id))
         except Exception as e:
             logging.error(f"Error in agent(%s) act process: %s", self.agent_type, e)
             raise RuntimeError(str(e))
@@ -315,3 +321,18 @@ class ReActAgent(BaseAgent):
         except Exception as e:
             logging.error(f"Tool({name}) execution error: {str(e)}")
             raise RuntimeError(f"Tool({name}) execution error: {str(e)}") 
+
+    def _is_special_tool(self, toolcall: ToolCall) -> bool:
+        """Check if tool name is in special tools list"""
+        name = toolcall.function.name
+        return name in self.special_tool_names
+     
+    async def _handle_special_tool(self, toolcall: ToolCall)  -> None:
+        """Handle special tool execution and state changes"""
+        name = toolcall.function.name
+        args = json.loads(toolcall.function.arguments or "{}")   
+        if name == "ask_question":
+            await self.push_history_message_and_notify_user(Message.assistant_message(args.get("ask_question") or ""))
+
+        self.state = AgentState.FINISHED
+        logging.info(f"Task completion or phased completion by special tool '{name}'")

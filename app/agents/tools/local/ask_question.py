@@ -11,7 +11,8 @@ class AskQuestion(BaseTool):
         
     @property
     def description(self) -> str:
-        return "Ask a question to the user to collect additional information needed to complete the task."
+        return """Ask a question to the user to collect additional information needed to complete the task.
+Note: Do not use this tool unless necessary. You should strive to understand the user's intention and complete the user's task independently. Only use this tool to confirm with the user when it is absolutely necessary without user confirmation."""
 
     @property
     def parameters(self) -> Dict[str, Any]:
