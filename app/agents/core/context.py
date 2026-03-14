@@ -25,7 +25,7 @@ class ContextBuilder:
         self.workspace_path = workspace_path
         self.params = dict(params) if params else {}
         self.skills_manager = SkillsManager(agent_path)
-        self.memory_manager = MemoryManager(session_id, workspace_path)
+        self.memory_manager = MemoryManager(session_id, workspace_path, agent_path=agent_path)
     
     async def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """

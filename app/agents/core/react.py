@@ -189,7 +189,7 @@ class ReActAgent(BaseAgent):
 
         llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
         context_builder = ContextBuilder(self.session_id, self.agent_path, self.workspace_path, self.params)
-        memory_manager = MemoryManager(self.session_id, self.workspace_path)
+        memory_manager = MemoryManager(self.session_id, self.workspace_path, agent_path=self.agent_path)
         try:
             # 连接并注册 MCP 工具
             await self._register_mcp_tools()

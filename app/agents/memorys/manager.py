@@ -25,22 +25,32 @@ class MemoryExtractPrompt(BaseModel):
     )
 
     @classmethod
-    def for_session(cls) -> "MemoryExtractPrompt":
-        """会话级预设：仅提炼本场对话要点，供本会话后续复用。"""
+    def for_workspace(cls) -> "MemoryExtractPrompt":
+        """工作空间级预设：提炼该工作空间下通用约定/偏好/关键结论，供后续会话复用；同时维护事件日志供检索。"""
         return cls(
-            system_prompt="""You are a session memory extraction expert, skilled at distilling key information and conclusions from multi-turn conversations for later use in the same session.
-Based on the "Current Session Memory" and "Content to Process" below, distill the key points of this session into durable session memory and summary, and call the save_memory tool to persist.
+            system_prompt="""You are the workspace memory consolidation agent. The workspace has two persistent stores:
 
-Note: Extract only key information and conclusions from this session for continuation of this conversation. Do not include content unrelated to or outside the scope of this session.""",
-            user_instruction="Read the \"Current Session Memory\" and \"Content to Process\" sections below, distill the key points of this session, and call save_memory to persist.",
+1. **MEMORY.md** – Long-term facts, preferences, and key conclusions. Referenced as: "Remember important information in {{ workspace_path }}/memory/MEMORY.md".
+2. **HISTORY.md** – Recent event log only (grep-searchable). Keep only the last 14 days (or last 100 entries if no dates); drop older entries. Referenced as: "Past events are logged in {{ workspace_path }}/memory/HISTORY.md" and "Recall past events: grep {{ workspace_path }}/memory/HISTORY.md".
+
+Call the save_memory tool with both:
+- **memory_update**: **Full overwrite**. While adding new memory, you must review the "Current Workspace Memory" and decide what to keep, what is outdated and can be dropped, and how to merge with new content; output the complete, updated MEMORY.md text (not an incremental patch).
+- **history_entry**: **Full overwrite**. From "Current Workspace History", keep only entries from the last 14 days (or the last 100 entries if dates are unclear), drop older ones, then append one new entry at the end (start with [YYYY-MM-DD HH:MM], then 2–5 sentences summarizing key events/decisions/topics for grep search). Output the complete HISTORY.md text (recent entries + new entry only).""",
+            user_instruction="Based on the conversation below, review and fully update long-term memory (memory_update) and the history log (history_entry: keep only last 14 days or last 100 entries, add the new entry, output the full HISTORY text), then call save_memory with both.",
         )
 
     @classmethod
-    def for_workspace(cls) -> "MemoryExtractPrompt":
-        """工作空间级预设：提炼该工作空间下通用约定/偏好/关键结论，供后续会话复用。"""
+    def for_agent(cls) -> "MemoryExtractPrompt":
+        """Agent 级别预设：提炼该类 Agent 执行过程中成功/失败场景的经验，供后续执行时参考（如常见命令行错误、有效做法等）。"""
         return cls(
-            system_prompt="""You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation.""",
-            user_instruction="Process this conversation and call the save_memory tool with your consolidation.",
+            system_prompt="""You are the experience consolidation agent for this agent type. Your goal is to distill reusable success/failure experience from the conversation into this agent type's long-term memory, for use across all future sessions—reducing repeated errors and reusing what works.
+
+Focus on:
+- **Failure experience**: e.g. commands that fail in certain environments, wrong usage, common pitfalls (paths, permissions, dependencies, etc.).
+- **Success experience**: e.g. effective commands for a task type, recommended workflows, environment constraints.
+
+Based on "Current Agent Memory" and "Content to Process" below, update only memory_update. **Full overwrite**: While adding new experience, you must review the existing "Current Agent Memory", decide what to keep, what is outdated and can be dropped, and how to merge with new experience; output the complete, updated agent-level MEMORY.md text (not an incremental patch). This level has no event log; pass an empty string for history_entry.""",
+            user_instruction="Based on the content below, review and fully update agent-level long-term memory (memory_update: keep still-valuable experience, merge new experience). Leave history_entry empty, then call save_memory.",
         )
 
 
@@ -76,10 +86,18 @@ MEMORY_DIR = "memory"
 class MemoryManager:
     """记忆管理器：实现三层记忆（会话/工作空间/Agent 类型）。"""
 
-    def __init__(self, session_id: str, workspace_path: str, llm_provider: Optional[str] = None, llm_model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        workspace_path: str,
+        agent_path: str,
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
+    ) -> None:
         self._session_id = session_id
         self._workspace_memory = Path(workspace_path) / MEMORY_DIR / "MEMORY.md"
         self._workspace_history = Path(workspace_path) / MEMORY_DIR / "HISTORY.md"
+        self._agent_memory = Path(agent_path) / MEMORY_DIR / "MEMORY.md"
         self._llm_provider = llm_provider or ""
         self._llm_model = llm_model or ""
 
@@ -155,10 +173,15 @@ class MemoryManager:
         self,
         content: str,
     ) -> None:
-        """工作空间记忆合并：提炼到 .workspace/<workspace_index>/memory/memory.md。"""
+        """工作空间记忆合并：提炼到 .workspace/<workspace_index>/memory/MEMORY.md 与 HISTORY.md（均为全量覆盖）。"""
         system_prompt = MemoryExtractPrompt.for_workspace().system_prompt
         current_memory = await self._read_file(self._workspace_memory)
-        user_content = f"## Current Workspace Memory\n{current_memory or '(empty)'}\n\n## Content to Process\n{content}"
+        current_history = await self._read_file(self._workspace_history)
+        user_content = (
+            f"## Current Workspace Memory\n{current_memory or '(empty)'}\n\n"
+            f"## Current Workspace History\n{current_history or '(empty)'}\n\n"
+            f"## Content to Process\n{content}"
+        )
         user_question = f"{MemoryExtractPrompt.for_workspace().user_instruction}\n\n{user_content}"
         memory_update, history_entry = await self._extract(
             system_prompt=system_prompt,
@@ -166,8 +189,23 @@ class MemoryManager:
         )
         if memory_update is not None and memory_update != current_memory:
             await self._write_file(self._workspace_memory, memory_update)
-        if history_entry is not None:
+        if history_entry is not None and history_entry != current_history:
             await self._write_file(self._workspace_history, history_entry)
+
+    async def _consolidate_agent_memory(self, content: str) -> None:
+        """Agent 类型记忆合并：提炼成功/失败经验到 .agent/<agent_type>/memory/MEMORY.md。"""
+        if self._agent_memory is None:
+            return
+        system_prompt = MemoryExtractPrompt.for_agent().system_prompt
+        current_memory = await self._read_file(self._agent_memory)
+        user_content = f"## Current Agent Memory\n{current_memory or '(empty)'}\n\n## Content to Process\n{content}"
+        user_question = f"{MemoryExtractPrompt.for_agent().user_instruction}\n\n{user_content}"
+        memory_update, _ = await self._extract(
+            system_prompt=system_prompt,
+            user_question=user_question,
+        )
+        if memory_update is not None and memory_update != current_memory:
+            await self._write_file(self._agent_memory, memory_update)
 
     async def consolidate_memory(
         self,
@@ -209,6 +247,7 @@ class MemoryManager:
         content = "\n".join(lines)
         
         await self._consolidate_workspace_memory(content)
+        await self._consolidate_agent_memory(content)
 
         # 更新会话的 last_consolidated 并持久化会话
         session.last_consolidated = (
@@ -227,11 +266,21 @@ class MemoryManager:
             return ""
         return f"## Long-term Memory\n{content.strip()}\n"
 
+    async def get_agent_memory_context(self) -> str:
+        """将 Agent 类型记忆拼成可追加到 Prompt 的 Markdown 片段（来自 .agent/<agent_type>/memory/MEMORY.md）。"""
+        if self._agent_memory is None:
+            return ""
+        content = await self._read_file(self._agent_memory)
+        if not (content or "").strip():
+            return ""
+        return f"## Agent Experience (success/failure)\n{content.strip()}\n"
+
     async def get_memory_context(
         self,
     ) -> str:
         """组合记忆上下文，供上层一次性拼接到 prompt。"""
         parts = [
+            await self.get_agent_memory_context(),
             await self.get_workspace_memory_context(),
         ]
         return "\n".join(p for p in parts if (p or "").strip())
