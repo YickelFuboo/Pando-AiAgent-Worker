@@ -52,44 +52,40 @@ class BaseModelFactory(ABC, Generic[T]):
     
     def get_supported_models(self) -> Dict[str, Any]:
         """
-        获取支持的供应方和模型支持的全集（只返回is_valid为1的）
+        获取支持的供应方和模型支持的全集（只返回is_valid为1的），并附带默认模型。
         
         Returns:
-            Dict[str, Any]: 所有支持的模型信息，结构为：
-            {
-                "provider_name": {
-                    "description": "provider_description",
-                    "models": {
-                        "model_name": {
-                            "description": "model_description"
-                        }
+            Dict[str, Any]: {
+                "supported": {
+                    "provider_name": {
+                        "description": "provider_description",
+                        "models": { "model_name": { "description": "model_description" } }
                     }
-                }
+                },
+                "default": {"provider": "...", "model": "..."} 或 None
             }
         """
         result = {}
         all_models = self._config.get("models", {})
-        
         for provider_name, provider_config in all_models.items():
-            # 只处理is_valid为1的provider
             if provider_config.get("is_valid", 0) == 1:
                 provider_info = {
                     "description": provider_config.get("description", ""),
-                    "models": {}
+                    "models": {},
                 }
-                
-                # 获取该provider下的所有模型
                 instances = provider_config.get("instances", {})
                 for model_name, model_config in instances.items():
                     provider_info["models"][model_name] = {
-                        "description": model_config.get("description", "")
+                        "description": model_config.get("description", ""),
                     }
-                
-                # 只有当该provider有有效模型时才添加到结果中
                 if provider_info["models"]:
                     result[provider_name] = provider_info
-        
-        return result
+        try:
+            provider, model = self.get_default_model()
+            default = {"provider": provider, "model": model}
+        except Exception:
+            default = None
+        return {"supported": result, "default": default}
 
     def if_model_support(self, provider: str, model: str) -> bool:
         """

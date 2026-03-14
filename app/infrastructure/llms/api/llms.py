@@ -84,55 +84,53 @@ class TTSRequest(ModelRequest):
 
 @router.get("/", summary="获取所有支持的模型列表")
 async def get_all_models():
-    """获取所有功能模块支持的模型列表"""
+    """获取所有功能模块支持的模型列表（含 supported 与 default）。"""
     try:
-        # 直接使用工厂方法获取模型列表
         return {
             "chat_models": llm_factory.get_supported_models(),
             "cv_models": cv_factory.get_supported_models(),
             "embedding_models": embedding_factory.get_supported_models(),
             "rerank_models": rerank_factory.get_supported_models(),
             "stt_models": stt_factory.get_supported_models(),
-            "tts_models": tts_factory.get_supported_models()
+            "tts_models": tts_factory.get_supported_models(),
         }
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取模型列表失败: {str(e)}")
 
 
 @router.get("/available/chat", summary="获取可用聊天模型列表")
 async def get_chat_models():
-    """获取可用聊天模型列表"""
+    """获取可用聊天模型列表及默认模型。"""
     return llm_factory.get_supported_models()
 
 
 @router.get("/available/cv", summary="获取可用计算机视觉模型列表")
 async def get_cv_models():
-    """获取可用计算机视觉模型列表"""
+    """获取可用计算机视觉模型列表及默认模型。"""
     return cv_factory.get_supported_models()
 
 
 @router.get("/available/embedding", summary="获取可用嵌入模型列表")
 async def get_embedding_models():
-    """获取可用嵌入模型列表"""
+    """获取可用嵌入模型列表及默认模型。"""
     return embedding_factory.get_supported_models()
 
 
 @router.get("/available/rerank", summary="获取可用重排序模型列表")
 async def get_rerank_models():
-    """获取可用重排序模型列表"""
+    """获取可用重排序模型列表及默认模型。"""
     return rerank_factory.get_supported_models()
 
 
 @router.get("/available/stt", summary="获取可用语音转文本模型列表")
 async def get_stt_models():
-    """获取可用语音转文本模型列表"""
+    """获取可用语音转文本模型列表及默认模型。"""
     return stt_factory.get_supported_models()
 
 
 @router.get("/available/tts", summary="获取可用文本转语音模型列表")
 async def get_tts_models():
-    """获取可用文本转语音模型列表"""
+    """获取可用文本转语音模型列表及默认模型。"""
     return tts_factory.get_supported_models()
 
 
