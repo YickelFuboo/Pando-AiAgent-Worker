@@ -245,15 +245,23 @@ When you have completed the task, provide a clear summary of your findings or ac
             # 构建提示词
             self.system_prompt = self._build_subagent_prompt()
 
+            content = ""
+            is_add_user_message = False
             while (self._current_step < self._max_steps and self._state != AgentState.FINISHED):
                 self._current_step += 1
 
                 # 模型思考和工具调度
                 content, tool_calls = await self.think(llm, task)
                 if not tool_calls:
+                    if not is_add_user_message:
+                        self.history_messages.append(Message.user_message(original_task))
+                        is_add_user_message = True
                     self.history_messages.append(Message.assistant_message(content))
                     break
                 else:
+                    if not is_add_user_message:
+                        self.history_messages.append(Message.user_message(original_task))
+                        is_add_user_message = True
                     self.history_messages.append(Message.tool_call_message(content, tool_calls))
                     await self.act(tool_calls)
 

@@ -1,9 +1,9 @@
 import logging
 from fastapi import APIRouter, HTTPException
 from app.channel.schemes import UserRequest, UserResponse
-from app.agents.core.react import ReActAgent
+from app.agents.sessions.message import Message
 from app.agents.sessions.manager import SESSION_MANAGER
-from app.infrastructure.llms.base_factory import llm_factory
+from app.infrastructure.llms.chat_models.factory import llm_factory
 
 
 router = APIRouter()
@@ -33,12 +33,15 @@ async def chat(request: UserRequest):
         response, token_count = await llm.chat(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=USER_PROMPT,
-            user_question=request.user_question,
+            user_question=request.content,
             history=history,
             temperature=0.7,
         )
         if not response.success:
             raise Exception(response.content)
+        # 记录历史消息
+        await SESSION_MANAGER.add_message(request.session_id, Message.user_message(request.content))
+        await SESSION_MANAGER.add_message(request.session_id, Message.assistant_message(response.content))
         return UserResponse(session_id=request.session_id, content=response.content)
     except Exception as e:
         logging.error(f"Error in chat: {e}")
