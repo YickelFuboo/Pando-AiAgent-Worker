@@ -18,9 +18,9 @@ async def default_on_execute(job: CronJob) -> None:
             logging.debug("Cron job %s REMIND need_deliver=False, skip", job.id)
             return
         channel_type = payload.deliver_channel_type or "cron"
+        channel_id = payload.deliver_channel_id or job.id
         user_id = payload.deliver_to or "cron"
-        session_id = payload.trigger_session_id or f""
-        channel_id = job.id
+        session_id = payload.trigger_session_id or ""
         msg = OutboundMessage(
             channel_type=channel_type,
             channel_id=channel_id,
@@ -29,19 +29,16 @@ async def default_on_execute(job: CronJob) -> None:
             content="定时提醒：" + payload.message,
         )
         await MESSAGE_BUS.push_outbound(msg)
-        # 加入Session的History中
-        await SESSION_MANAGER.add_message(session_id, Message.assistant_message("定时提醒：" + payload.message))
+        if session_id:
+            await SESSION_MANAGER.add_message(session_id, Message.assistant_message("定时提醒：" + payload.message))
         logging.info("Cron job %s REMIND pushed to bus and session_id=%s", job.id, session_id)
     elif payload.kind == CronKind.AGENT:
-        agent_type = payload.agent_type or "default"
-        channel_type = payload.deliver_channel_type or ""
-        user_id = payload.deliver_to or ""        
-        session_id = payload.trigger_session_id or f""
+        session_id = payload.trigger_session_id or ""
         if not session_id:
             session_id = await SESSION_MANAGER.create_session(
-                user_id=user_id,
-                agent_type=agent_type,
-                channel_type=channel_type,
+                user_id=payload.deliver_to,
+                agent_type=payload.agent_type,
+                channel_type=payload.deliver_channel_type,
                 description=job.name or "cron",
             )
 
@@ -51,13 +48,13 @@ async def default_on_execute(job: CronJob) -> None:
             for k, v in payload.extra.items():
                 parts.append(f"{k}: {v}")
             content = "\n".join(parts)
-        
+
         inbound = InboundMessage(
-            agent_type=agent_type,
-            channel_type=channel_type,
-            channel_id=job.id,
+            agent_type=payload.agent_type,
+            channel_type=payload.deliver_channel_type,
+            channel_id=payload.deliver_channel_id,
             session_id=session_id,
-            user_id=user_id,
+            user_id=payload.deliver_to,
             content=content or "执行定时任务",
         )
         await MESSAGE_BUS.push_inbound(inbound)

@@ -21,7 +21,7 @@ class SessionManager:
 
     async def create_session(
         self,
-        user_id: str = "anonymous",
+        user_id: str,
         agent_type: Optional[str] = None,
         channel_type: Optional[str] = None,
         description: Optional[str] = None,
@@ -35,9 +35,9 @@ class SessionManager:
         session_id = f"session_{timestamp}_{random_suffix}"
         session = Session(
             session_id=session_id,
-            user_id=user_id,
-            description=description,
-            agent_type=agent_type,
+            user_id=user_id or "anonymous",
+            description=description or "",
+            agent_type=agent_type or "default",
             channel_type=channel_type or "",
             llm_provider=llm_provider or "",
             llm_model=llm_model or "",

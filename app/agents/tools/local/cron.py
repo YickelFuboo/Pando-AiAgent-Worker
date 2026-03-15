@@ -2,7 +2,6 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 from app.domains.cron import CRON_MANAGER, CronKind, CronPayload, CronSchedule
-from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.tools.base import BaseTool
 from app.agents.tools.schemes import ToolResult, ToolSuccessResult, ToolErrorResult
 
@@ -15,10 +14,16 @@ class CronTool(BaseTool):
         *,
         session_id: str = "",
         user_id: str = "",
+        agent_type: str = "",
+        channel_id: str = "",
+        channel_type: str = "",
     ):
         self._cron = CRON_MANAGER
         self._session_id = session_id or ""
         self._user_id = user_id or ""
+        self._agent_type = agent_type or ""
+        self._channel_id = channel_id or ""
+        self._channel_type = channel_type or ""
 
     @property
     def name(self) -> str:
@@ -71,10 +76,6 @@ class CronTool(BaseTool):
                     "enum": ["remind", "agent"],
                     "description": "Task type: remind=notify user, agent=run agent (for add)",
                 },
-                "agent_type": {
-                    "type": "string",
-                    "description": "Agent type when kind=agent (for add)",
-                },
             },
             "required": ["action"],
         }
@@ -90,11 +91,10 @@ class CronTool(BaseTool):
         job_id: Optional[str] = None,
         enabled: Optional[bool] = None,
         kind: str = "remind",
-        agent_type: Optional[str] = None,
         **kwargs: Any,
     ) -> ToolResult:
         if action == "add":
-            return await self._add(message, every_seconds, cron_expr, tz, at, kind, agent_type)
+            return await self._add(message, every_seconds, cron_expr, tz, at, kind)
         if action == "list":
             return await self._list()
         if action == "remove":
@@ -111,7 +111,6 @@ class CronTool(BaseTool):
         tz: Optional[str],
         at: Optional[str],
         kind: str,
-        agent_type: Optional[str],
     ) -> ToolResult:
         if not message and kind == "remind":
             return ToolErrorResult("message is required for add (remind)")
@@ -123,11 +122,6 @@ class CronTool(BaseTool):
                 ZoneInfo(tz)
             except Exception:
                 return ToolErrorResult(f"Unknown timezone: {tz!r}")
-        if not self._session_id:
-            return ToolErrorResult("No session context (session_id) for add")
-        session = await SESSION_MANAGER.get_session(self._session_id)
-        if not session:
-            return ToolErrorResult("Session not found")
 
         delete_after = False
         if every_seconds is not None and every_seconds > 0:
@@ -145,22 +139,16 @@ class CronTool(BaseTool):
         else:
             return ToolErrorResult("One of every_seconds, cron_expr, or at is required")
 
-        payload_kind = CronKind.AGENT if kind == "agent" else CronKind.REMIND
-        need_deliver = payload_kind == CronKind.REMIND
-        deliver_channel_type = session.channel_type or "cron"
-        deliver_to = self._user_id or ""
-        if not deliver_to:
-            if session.metadata and isinstance(session.metadata, dict):
-                deliver_to = str(session.metadata.get("channel_id") or "")
-        deliver_to = deliver_to or session.user_id or "cron"
+        kind_enum = CronKind.AGENT if kind == "agent" else CronKind.REMIND
         payload = CronPayload(
-            kind=payload_kind,
+            kind=kind_enum,
             message=message,
             trigger_session_id=self._session_id,
-            need_deliver=need_deliver,
-            deliver_to=deliver_to,
-            deliver_channel_type=deliver_channel_type,
-            agent_type=agent_type if kind == "agent" else None,
+            need_deliver=(kind_enum == CronKind.REMIND),
+            deliver_to=self._user_id,
+            deliver_channel_type=self._channel_type,
+            deliver_channel_id=self._channel_id or "",
+            agent_type=self._agent_type,
         )
         job = await self._cron.add_job(
             name=(message or "cron")[:30],

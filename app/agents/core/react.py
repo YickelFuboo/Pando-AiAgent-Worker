@@ -127,7 +127,7 @@ class ReActAgent(BaseAgent):
         if "web_fetch" in usable:
             tools_to_register.append(WebFetchTool())
         if "cron" in usable:
-            tools_to_register.append(CronTool(session_id=self.session_id, user_id=self.user_id))
+            tools_to_register.append(CronTool(session_id=self.session_id, user_id=self.user_id, agent_type=self.agent_type, channel_id=self.channel_id, channel_type=self.channel_type))
         if "spawn" in usable:
             tools_to_register.append(SpawnTool(self.subagent_manager))
         

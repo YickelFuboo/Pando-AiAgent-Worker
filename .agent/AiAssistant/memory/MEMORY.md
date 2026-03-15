@@ -1,10 +1,24 @@
 # Agent Memory - Windows System Operations
 
+## Agent Identity
+
+### Name
+- **中文名**：潘多
+- **英文名**：Pando
+
+### Core Positioning
+- Actively search internet for tools, skills, and resources to accomplish user goals
+- Be proactive and resourceful in finding solutions
+- Store credentials securely in skill-specific config files
+
+### Response Language
+- Use Chinese (中文) to report results when user prefers it
+
 ## Disk Information Queries
 
 ### Effective Commands
 - **List all disk drives**: `wmic logicaldisk get caption,description,drivetype,size,freespace`
-  - Returns: drive letter, description, type (3=local fixed disk), free space, total size
+  - Returns: drive letter, description, type (3=local disk), free space, total size
   - Works reliably on Windows systems
 
 ## Directory Listing
@@ -70,26 +84,50 @@
   - Example: `npx --yes clawhub@latest search "email send" --limit 5`
   - Returns matching skills with relevance scores
 
+- **Install a skill**: `npx --yes clawhub@latest install <skill_name> --workdir "<path>"`
+  - Example: `npx --yes clawhub@latest install sendclaw --workdir "F:\path\to\skills"`
+  - Skills install to `<workdir>/skills/<skill_name>/`
+
 ### Known Skill Categories
-- Email sending: send-email, email-send, resend-email-sender
+- Email sending: send-email, email-send, resend-email-sender, sendclaw
 - Scheduling: cron (built-in skill for reminders and recurring tasks)
 
 ## Cron Skill (Built-in)
 
 ### Three Modes
 1. **Reminder** - message is sent directly to user
-2. **Task** - message is a task description, agent executes and sends result
+2. **Task (agent mode)** - message is a task description, agent executes and sends result
 3. **One-time** - runs once at a specific time, then auto-deletes
 
-### Usage Pattern
+### Usage Patterns
 ```
-cron(action="add", message="...", every_seconds=N)
+# Simple reminder
+cron(action="add", message="Time to take a break!", every_seconds=1200)
+
+# Agent task with cron expression
+cron(action="add", kind="agent", message="Task description...", cron_expr="0 7 * * *", tz="Asia/Shanghai")
 ```
+
+## SendClaw Email Service
+
+### Registration
+- **API endpoint**: `POST https://sendclaw.com/api/bots/register`
+- **Request body**: `{"name": "BotName", "handle": "bot_handle", "senderName": "Sender Name"}`
+- **Handle format constraint**: lowercase letters, numbers, and underscores ONLY (no hyphens!)
+- **Response includes**: botId, email (handle@sendclaw.com), apiKey, claimToken
+
+### Sending Email
+- Requires SENDCLAW_API_KEY environment variable
+- API base: https://sendclaw.com/api
+- **Send endpoint**: `POST https://sendclaw.com/api/mail/send`
+- **Headers**: `Content-Type: application/json`, `X-Api-Key: <api_key>`
+- **Body**: `{"to": "recipient@email.com", "subject": "Subject", "body": "Message body"}`
 
 ## Multi-step Solution Design Pattern
 
 When user requests complex automation (e.g., daily AI news search + email notification):
 1. Check available built-in skills (cron for scheduling)
 2. Search ClawHub for additional required skills (email sending)
-3. Combine skills to build complete solution
-4. User-specific data (email addresses, preferences) should be stored in user memory, not agent memory
+3. Install and configure external skills
+4. Combine skills to build complete solution
+5. User-specific data (email addresses, preferences) should be stored in user memory, not agent memory
