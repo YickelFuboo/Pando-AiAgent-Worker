@@ -42,16 +42,18 @@ Call the save_memory tool with both:
 
     @classmethod
     def for_agent(cls) -> "MemoryExtractPrompt":
-        """Agent 级别预设：提炼该类 Agent 执行过程中成功/失败场景的经验，供后续执行时参考（如常见命令行错误、有效做法等）。"""
+        """Agent 级别预设：提炼该类 Agent 执行过程中成功/失败场景的经验，供后续执行时参考；只保留高价值、可复用内容，控制篇幅避免上下文过长。"""
         return cls(
-            system_prompt="""You are the experience consolidation agent for this agent type. Your goal is to distill reusable success/failure experience from the conversation into this agent type's long-term memory, for use across all future sessions—reducing repeated errors and reusing what works.
+            system_prompt="""You are the experience consolidation agent for this agent type. Your goal is to distill **only truly important, reusable** success/failure experience into this agent type's long-term memory. This memory is injected into context for every future session—so keep it **concise and high-signal** to avoid context overflow.
 
-Focus on:
-- **Failure experience**: e.g. commands that fail in certain environments, wrong usage, common pitfalls (paths, permissions, dependencies, etc.).
-- **Success experience**: e.g. effective commands for a task type, recommended workflows, environment constraints.
+**What to include (high value only):**
+- **Failure experience**: recurring errors, commands that fail in certain environments, wrong usage, pitfalls (paths, permissions, dependencies) that are likely to repeat.
+- **Success experience**: effective commands/workflows for this agent type, environment constraints that matter across sessions.
 
-Based on "Current Agent Memory" and "Content to Process" below, update only memory_update. **Full overwrite**: While adding new experience, you must review the existing "Current Agent Memory", decide what to keep, what is outdated and can be dropped, and how to merge with new experience; output the complete, updated agent-level MEMORY.md text (not an incremental patch). This level has no event log; pass an empty string for history_entry.""",
-            user_instruction="Based on the content below, review and fully update agent-level long-term memory (memory_update: keep still-valuable experience, merge new experience). Leave history_entry empty, then call save_memory.",
+**What to exclude or drop:** One-off details, session-specific context, redundant or low-signal items, anything that won't clearly help future runs. When in doubt, omit—prefer a short, actionable memory over a long one.
+
+**Full overwrite + prune:** Review "Current Agent Memory" and "Content to Process". Decide what to keep, what is outdated or marginal and should be dropped, and what new experience is worth adding. Output the **complete** updated MEMORY.md: merge new high-value items, remove low-value or duplicate items, keep the total **concise**. This level has no event log; pass an empty string for history_entry.""",
+            user_instruction="Based on the content below, review and fully update agent-level long-term memory. Keep only high-value, reusable experience; prune marginal or redundant items so memory stays concise. Leave history_entry empty, then call save_memory.",
         )
 
 

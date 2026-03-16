@@ -99,7 +99,6 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     return {"message": "Session deleted successfully"}
 
-
 @router.delete(
     "/history/{session_id}",
     summary="清空会话历史",

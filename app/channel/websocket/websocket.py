@@ -62,6 +62,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
                     agent_type=parsed.get("agent_type"),
                     llm_provider=parsed.get("llm_provider"),
                     llm_model=parsed.get("llm_model"),
+                    metadata=parsed.get("metadata"),
                 )
                 inbound_msg = InboundMessage(
                     channel_type="websocket",
@@ -72,6 +73,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str = None):
                     content=payload.content,
                     llm_provider=payload.llm_provider if payload.llm_provider is not None else (session.llm_provider or ""),
                     llm_model=payload.llm_model if payload.llm_model is not None else (session.llm_model or ""),
+                    metadata=payload.metadata,
                 )
                 await MESSAGE_BUS.push_inbound(inbound_msg)
         except WebSocketDisconnect:
