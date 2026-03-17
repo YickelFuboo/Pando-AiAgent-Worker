@@ -69,7 +69,7 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
-        # 4. 技能分两种：常驻技能直接全文放入；其余只给摘要，让 Agent 用 read_file 按需读 SKILL.md
+        # 3. 技能分两种：常驻技能直接全文放入；其余只给摘要，让 Agent 用 read_file 按需读 SKILL.md
         always_skills = self.skills_manager.get_always_skills()
         if always_skills:
             always_content = self.skills_manager.get_skills_content_for_context(always_skills)

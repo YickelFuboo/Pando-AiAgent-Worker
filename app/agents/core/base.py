@@ -18,7 +18,6 @@ class AgentState(str, Enum):
     ERROR = "ERROR"  # Error state
     FINISHED = "FINISHED"  # Finished state
 
-
 class ToolChoice(str, Enum):
     """工具调用模式：none=不暴露工具，auto=由模型决定，required=必须调用工具。"""
     NONE = "none"
@@ -82,7 +81,7 @@ class BaseAgent(ABC):
         # 执行步数相关
         self._state = AgentState.IDLE
         self._current_step = 0
-        self._max_steps = max_steps or 100
+        self._max_steps = max_steps or 50
         self._max_duplicate_steps = max_duplicate_steps or 2   # 最大重复次数，用于检验当前项agent是否挂死
         self._stop_requested = False
 

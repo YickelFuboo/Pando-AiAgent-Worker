@@ -1,5 +1,5 @@
-from typing import Dict, Any
 from enum import Enum
+from typing import Any, Dict, Optional
 
 
 class ToolResultStatus(Enum):
@@ -15,26 +15,27 @@ class ToolResultStatus(Enum):
     EXECUTE_RESUMED = "execute_resumed" # 执行恢复
 
 class ToolResult:
-    """工具执行结果"""
-    def __init__(self, status: ToolResultStatus, result: Any):
+    """工具执行结果。可选 metadata 供工具自行标注 truncated/outputPath 等。"""
+    def __init__(self, status: ToolResultStatus, result: Any, metadata: Optional[Dict[str, Any]] = None):
         self.status = status
         self.result = result
+        self.metadata = metadata
 
     def __bool__(self):
         """判断工具执行结果是否成功"""
         return self.status == ToolResultStatus.EXECUTE_SUCCESS
 
-    def to_json(self) -> Dict:  
+    def to_json(self) -> Dict:
         """Convert tool result to JSON format."""
-        return {
-            "status": self.status.value,
-            "result": self.result,
-        }
+        out = {"status": self.status.value, "result": self.result}
+        if self.metadata is not None:
+            out["metadata"] = self.metadata
+        return out
 
 class ToolSuccessResult(ToolResult):
-    """工具执行成功结果"""
-    def __init__(self, result: Any):
-        super().__init__(ToolResultStatus.EXECUTE_SUCCESS, result)
+    """工具执行成功结果。若设置 metadata.truncated，则调用方不再做统一截断。"""
+    def __init__(self, result: Any, metadata: Optional[Dict[str, Any]] = None):
+        super().__init__(ToolResultStatus.EXECUTE_SUCCESS, result, metadata=metadata)
 
 class ToolTimeoutResult(ToolResult):
     """工具执行超时结果"""

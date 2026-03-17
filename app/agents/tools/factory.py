@@ -2,10 +2,12 @@ import json
 import logging
 from typing import Any, Dict, List
 from .base import BaseTool
-from .schemes import ToolResult, ToolSuccessResult, ToolTimeoutResult, ToolErrorResult, ToolCancelledResult
+from .schemes import ToolResult, ToolSuccessResult, ToolErrorResult
+from .truncation import Truncate
 
 TOOLS_CACHE_NAME = ("exec",)
 MAX_CACHE_SIZE = 256
+DELEGATION_TOOL_NAME = "spawn"
 
 
 def _cache_key(tool_name: str, tool_params: Dict[str, Any]) -> tuple[str, str]:
@@ -14,18 +16,24 @@ def _cache_key(tool_name: str, tool_params: Dict[str, Any]) -> tuple[str, str]:
 
 
 class ToolsFactory:
-    """工具市场管理器，部分工具按「工具名+参数」缓存结果。"""
-    def __init__(self, *tools: BaseTool):
+    """工具市场管理器；超长输出截断时的 hint 根据是否可委托子 Agent（当前是否注册 spawn）选择不同提示。"""
+    def __init__(self, *tools: BaseTool, workspace_path: str = ""):
         self._tools: Dict[str, BaseTool] = {tool.name: tool for tool in tools}
         self._cacheable: set[str] = set(TOOLS_CACHE_NAME)
         self._max_cache_size = MAX_CACHE_SIZE
         self._result_cache: Dict[tuple[str, str], ToolResult] = {}
+        self.workspace_path = workspace_path
 
     def get_tool(self, name: str) -> BaseTool:
         return self._tools.get(name)
 
     def has_tool(self, name: str) -> bool:
         return name in self._tools
+
+    @property
+    def has_spawn_tool(self) -> bool:
+        """当前是否可委托子 Agent：由工具集合是否含 spawn 决定。"""
+        return self.has_tool(DELEGATION_TOOL_NAME)
 
     def register_tool(self, tool: BaseTool) -> None:
         self._tools[tool.name] = tool
@@ -79,6 +87,20 @@ class ToolsFactory:
 
             # 执行工具调用
             result = await tool.execute(**tool_params)
+
+            # 仅对成功结果做超长截断，统一在 Factory 处理；工具无需自行截断
+            if result and self.workspace_path:
+                raw = f"{result.result}"
+                truncated = Truncate.output(
+                    raw,
+                    self.workspace_path,
+                    has_task_tool=self.has_spawn_tool,
+                )
+                if truncated.truncated and truncated.output_path:
+                    result = ToolSuccessResult(
+                        truncated.content,
+                        metadata={"truncated": True, "outputPath": truncated.output_path},
+                    )
 
             # 可缓存工具：写入缓存并限制容量
             if tool_name in self._cacheable:

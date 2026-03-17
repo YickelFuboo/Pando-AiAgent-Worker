@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, WORKSPACE_DIR
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
@@ -84,7 +84,7 @@ class ReActAgent(BaseAgent):
         )
 
         # 工具信息
-        self.available_tools = ToolsFactory()
+        self.available_tools = ToolsFactory(workspace_path=self.workspace_path)
         self.tool_choices = ToolChoice.AUTO
         self.special_tool_names: List[str] = ["ask_question", "terminate"]
         self._register_tools()
@@ -307,14 +307,16 @@ class ReActAgent(BaseAgent):
                 if self._is_special_tool(toolcall):
                     await self._handle_special_tool(toolcall)
                 else:
-                    result = await self.execute_tool(toolcall)  
-                    await self.push_history_message_and_notify_user(Message.tool_result_message(result, toolcall.function.name, toolcall.id))
+                    content, meta = await self.execute_tool(toolcall)
+                    await self.push_history_message_and_notify_user(
+                        Message.tool_result_message(content, toolcall.function.name, toolcall.id, metadata=meta)
+                    )
         except Exception as e:
             logging.error(f"Error in agent(%s) act process: %s", self.agent_type, e)
             raise RuntimeError(str(e))
 
-    async def execute_tool(self, toolcall: ToolCall) -> str:
-        """Execute a single tool call with robust error handling"""
+    async def execute_tool(self, toolcall: ToolCall) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """执行单次工具调用"""
         if not toolcall or not toolcall.function:
             raise ValueError("Invalid tool call format")
             
@@ -325,8 +327,7 @@ class ReActAgent(BaseAgent):
         try:
             args = json.loads(toolcall.function.arguments or "{}")
             tool_result = await self.available_tools.execute(tool_name=name, tool_params=args)
-            return f"{tool_result.result}"
-
+            return (f"{tool_result.result}", getattr(tool_result, "metadata", None))
         except json.JSONDecodeError:
             logging.error(f"Invalid JSON arguments for tool '{name}'")
             raise ValueError(f"Invalid JSON arguments for tool '{name}'")

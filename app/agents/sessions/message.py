@@ -1,7 +1,7 @@
 import json
 import re
 from enum import Enum
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 
@@ -82,6 +82,7 @@ class Message(BaseModel):
     # 工具执行结果信息
     name: Optional[str] = Field(default=None, description="工具名")
     tool_call_id: Optional[str] = Field(default=None, description="对应 assistant 消息里 tool_calls[].id")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="工具结果元数据：truncated、outputPath 等，供人/UI 用，不发给模型")
 
     create_time: Optional[datetime] = Field(default=None)
 
@@ -122,13 +123,20 @@ class Message(BaseModel):
         )
 
     @classmethod
-    def tool_result_message(cls, content: str, name: str, tool_call_id: str) -> "Message":
-        """创建工具执行结果消息（role=tool）。"""
+    def tool_result_message(
+        cls,
+        content: str,
+        name: str,
+        tool_call_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "Message":
+        """创建工具执行结果消息（role=tool）。content 为进上下文的摘要；metadata 含 truncated/outputPath 供人/UI。"""
         return cls(
             role="tool",
             content=content,
             name=name,
             tool_call_id=tool_call_id,
+            metadata=metadata,
             create_time=datetime.now(),
         )
 
@@ -146,12 +154,14 @@ class Message(BaseModel):
         if self.name is not None and self.tool_call_id is not None:
             message["name"] = self.name
             message["tool_call_id"] = self.tool_call_id
+        if self.metadata is not None:
+            message["metadata"] = self.metadata
         if self.create_time:
             message["create_time"] = self.create_time.strftime("%Y-%m-%d %H:%M:%S")
         return message
 
     def to_context(self) -> Dict[str, Any]:
-        """提供给 LLM API 的消息格式，不包含 create_time。"""
+        """提供给 LLM API 的消息格式：仅 role/content/name/tool_call_id，不包含 metadata。"""
         message = {"role": self.role.value}
         if self.content is not None:
             message["content"] = self.content
@@ -198,8 +208,7 @@ class Message(BaseModel):
         return "\n".join(lines).strip()
 
     def _tool_result_to_md(self) -> str:
-        """将工具执行结果消息转为 MD。"""
-        #lines = [(self.name or "") + " executed. "]
+        """将工具执行结果消息转为 MD；若存在截断元数据则追加「查看完整输出」提示。"""
         lines = [(self.name or "") + " result： "]
         raw = _strip_ansi((self.content or "").strip())
         try:
@@ -216,4 +225,7 @@ class Message(BaseModel):
                 lines.append("```text")
                 lines.append(raw or "(无)")
                 lines.append("```")
+        if self.metadata and self.metadata.get("truncated") and self.metadata.get("outputPath"):
+            lines.append("")
+            lines.append(f"*（输出已截断，完整内容已保存至：`{self.metadata['outputPath']}`）*")
         return "\n".join(lines)

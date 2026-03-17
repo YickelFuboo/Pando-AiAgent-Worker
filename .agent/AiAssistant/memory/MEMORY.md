@@ -1,4 +1,4 @@
-# Agent Memory - Windows System Operations
+# Agent Memory - Windows System Operations & Project Analysis
 
 ## Agent Identity
 
@@ -14,137 +14,146 @@
 ### Response Language
 - Use Chinese (中文) to report results when user prefers it
 
-## Disk Information Queries
+## Project Analysis Workflow
 
-### Effective Commands
-- **List all disk drives**: `wmic logicaldisk get caption,description,drivetype,size,freespace`
-  - Returns: drive letter, description, type (3=local disk), free space, total size
-  - Works reliably on Windows systems
+### .pando Directory Structure Standard
+For any project analysis, create a standardized `.pando` directory structure:
+```
+.pando/
+├── Functions/
+│   ├── 功能1.md
+│   ├── 功能2.md
+│   └── ...
+├── interface.md
+├── design.md
+└── code.md
+```
 
-## Directory Listing
+### Analysis Methodology
+1. **Bottom-up Analysis**: Start from smallest subdirectories, then analyze parent directories
+2. **Function Documentation**: Each function gets its own md file with:
+   - 功能简介
+   - 功能规格  
+   - 功能约束
+   - 主要交互流程
+   - 异常分支流程
+3. **Layered Documentation**: Root directory contains overall project analysis, subdirectories contain module-specific analysis
 
-### Effective Commands
-- **List directories only**: `dir <path> /B /A:D`
-  - `/B` = bare format (names only)
-  - `/A:D` = attributes: directories only
-  - Example: `dir E:\ /B /A:D`
+## Windows File Operations
 
-- **List files with pattern**: `dir <path>\<pattern> /B /S 2>nul`
-  - `/S` = recursive
-  - `2>nul` = suppress errors
-  - Example: `dir E:\*.doc* /B /S 2>nul`
+### Directory Creation
+- Use `mkdir` command to create directories and subdirectories
+- Create nested structures step by step to ensure success
+- Create `.pando/Functions` subdirectory before adding function files
 
-## File Search Limitations
+### File Writing for Chinese Content
+- UTF-8 encoding is supported for Chinese characters
+- Use `write_file` for structured documentation generation
 
-### Safety Guard Restrictions
-- **Blocked**: PowerShell recursive searches with `-Recurse` parameter trigger safety guard blocks
-  - Pattern blocked: `Get-ChildItem -Path ... -Recurse ... | Where-Object {...}`
-  - Safety guard detects this as "dangerous pattern"
-  
-### Workarounds for File Search
-1. **Use `dir` with `findstr` for name filtering**: 
-   - `dir <path>\<pattern> /B /S 2>nul | findstr /I "keyword"`
-   - Works with Chinese characters: `findstr /I "实践"`
+## Python Projects Analysis Pattern
 
-2. **Browse directories incrementally**:
-   - Start with root directory listing
-   - Navigate to specific folders of interest
-   - Search within known locations
+### Common Directory Structure
+```
+project_root/
+├── app/               # Main application code
+│   ├── agents/        # AI agent implementations
+│   ├── chat/          # Chat functionality
+│   ├── llms/          # Language model integrations
+│   ├── session/       # Session management
+│   ├── tools/         # Tool implementations
+│   └── main.py        # FastAPI application entry
+├── config.toml        # Configuration file
+├── requirements.txt   # Python dependencies
+└── run.py            # Application runner
+```
 
-## Command Compatibility Notes
+### Analysis Content Guidelines
+1. **Functions/** - Document each major functionality as separate markdown files
+2. **interface.md** - Document all public APIs and interfaces
+3. **design.md** - Document architecture, tech stack, and key design decisions
+4. **code.md** - Document coding patterns, style guidelines, and conventions
 
-### Windows CMD vs Unix Commands
-- **`head` is NOT available** in Windows CMD - causes "not recognized" error
-- Alternatives for limiting output:
-  - `more` command for paging
-  - PowerShell: `Select-Object -First N`
-  - Redirect to file and view portions
+## Key Technology Patterns Identified
+
+### FastAPI-based Services
+- Main entry: `app/main.py` with FastAPI instance
+- CORS middleware configuration
+- Modular API registration (llm_api, session_api, chat_api, etc.)
+- Lifespan management with `@asynccontextmanager`
+
+### Agent Architecture
+- BaseAgent abstract class with core functionality
+- Multiple agent types: ClineAgent, SWEAgent
+- State management: IDLE, RUNNING, COMPLETED, ERROR
+- WebSocket integration for real-time communication
+- Tool calling framework with XML-style parsing
+
+### LLM Integration
+- Factory pattern for multiple LLM providers
+- OpenAI-compatible API support (DeepSeek, etc.)
+- Token management and streaming support
+- Prompt template system
+
+### Session Management
+- Session-based conversation handling
+- Message history persistence
+ Parent-child session relationships
+
+## Windows Command Limitations & Workarounds
+
+### Command Compatibility
+- **`head` is NOT available** in Windows CMD
+- Use `more` for paging or PowerShell `Select-Object -First N`
 
 ### Chinese Character Support
-- Chinese characters work in `findstr` patterns: `findstr /I "实践"`
-- Character encoding may show garbled text in `wmic` output (Chinese system descriptions display incorrectly)
+- Chinese characters work in `findstr` patterns
+- System descriptions in `wmic` may display garbled Chinese text
 - This does not affect functionality - drive letters and numeric values display correctly
 
-## Recommended Workflow for Disk Searches
+## Effective Windows Commands
 
-1. First, identify available drives with `wmic logicaldisk`
-2. List root directories to understand structure: `dir <drive>:\ /B /A:D`
-3. Navigate to relevant folders based on naming/organization
-4. Use `dir ... | findstr` for targeted searches within known locations
-5. Avoid PowerShell `-Recurse` patterns that trigger safety blocks
+### Directory Operations
+- **List directories only**: `dir <path> /B /A:D`
+- **List files with pattern**: `dir <path>\<pattern> /B /S 2>nul`
+
+### Avoid These Patterns
+- PowerShell recursive searches with `-Recurse` trigger safety guard blocks
 
 ## ClawHub Skill Registry
 
 ### Purpose
-- Public skill registry for AI agents at https://clawhub.ai
-- Search and install agent skills using natural language (vector search)
+- Public skill registry at https://clawhub.ai
+- Search and install agent skills using natural language
 
-### Effective Commands
-- **Search for skills**: `npx --yes clawhub@latest search "<query>" --limit N`
-  - Example: `npx --yes clawhub@latest search "email send" --limit 5`
-  - Returns matching skills with relevance scores
-
-- **Install a skill**: `npx --yes clawhub@latest install <skill_name> --workdir "<path>"`
-  - Example: `npx --yes clawhub@latest install sendclaw --workdir "F:\path\to\skills"`
-  - Skills install to `<workdir>/skills/<skill_name>/`
-
-### Known Skill Categories
-- Email sending: send-email, email-send, resend-email-sender, sendclaw
-- Scheduling: cron (built-in skill for reminders and recurring tasks)
+### Commands
+- **Search**: `npx --yes clawhub@latest search "<query>" --limit N`
+- **Install**: `npx --yes clawhub@latest install <skill_name> --workdir "<path>"`
 
 ## Cron Skill (Built-in)
 
-### Three Modes
-1. **Reminder** - message is sent directly to user
-2. **Task (agent mode)** - message is a task description, agent executes and sends result
-3. **One-time** - runs once at a specific time, then auto-deletes
+### Modes
+1. **Reminder** - direct message to user
+2. **Task (agent mode)** - agent executes task and sends result
+3. **One-time** - runs once then auto-deletes
 
-### Usage Patterns
-```
-# Simple reminder
-cron(action="add", message="Time to take a break!", every_seconds=1200)
-
-# Agent task with cron expression
-cron(action="add", kind="agent", message="Task description...", cron_expr="0 7 * * *", tz="Asia/Shanghai")
+### Usage
+```python
+cron(action="add", message="Reminder text", every_seconds=1200)
+cron(action="add", kind="agent", message="Task...", cron_expr="0 7 * * *", tz="Asia/Shanghai")
 ```
 
 ## SendClaw Email Service
 
-### Registration
-- **API endpoint**: `POST https://sendclaw.com/api/bots/register`
-- **Request body**: `{"name": "BotName", "handle": "bot_handle", "senderName": "Sender Name"}`
-- **Handle format constraint**: lowercase letters, numbers, and underscores ONLY (no hyphens!)
-- **Response includes**: botId, email (handle@sendclaw.com), apiKey, claimToken
-
-### Sending Email
-- Requires SENDCLAW_API_KEY environment variable
-- API base: https://sendclaw.com/api
-- **Send endpoint**: `POST https://sendclaw.com/api/mail/send`
-- **Headers**: `Content-Type: application/json`, `X-Api-Key: <api_key>`
-- **Body**: `{"to": "recipient@email.com", "subject": "Subject", "body": "Message body"}`
+### Registration Constraints
+- **Handle format**: lowercase letters, numbers, and underscores ONLY (no hyphens!)
+- API endpoint: `POST https://sendclaw.com/api/bots/register`
 
 ### Windows Compatibility
-- `curl` command may fail with "The system cannot find the path specified" error
-- Workaround: write JSON payload to a file and use `-d @filename` syntax
-- Example: Write to `temp_email.json` then use `curl -d @temp_email.json`
+- `curl` may fail with "path not found" error
+- Workaround: write JSON to file first, then use `curl -d @filename`
 
-## Multi-step Solution Design Pattern
+## Memory Storage Locations
 
-When user requests complex automation (e.g., daily AI news search + email notification):
-1. Check available built-in skills (cron for scheduling)
-2. Search ClawHub for additional required skills (email sending)
-3. Install and configure external skills
-4. Combine skills to build complete solution
-5. User-specific data (email addresses, preferences) should be stored in user memory, not agent memory
-
-## AI Agent System Structure
-
-### Memory File Locations
-- **Agent-level memory**: `AiAssistant/memory/MEMORY.md` (permanent)
-- **Workspace-specific**: Located in `<workspace_id>/AiAssistant/memory/MEMORY.md`
-- **Default memory directory**: System may use `default/memory` as fallback (not agent-controlled)
-
-### Skill Installation Path
-- Skills install to specified `--workdir` path
-- Creates nested structure: `<workdir>/skills/<skill_name>/`
-- Example: `skills/skills/sendclaw/` (double skills folder due to registry structure)
+- **Agent-level**: `AiAssistant/memory/MEMORY.md` (permanent)
+- **Workspace-specific**: `<workspace_id>/AiAssistant/memory/MEMORY.md`
+- **Skill installation**: `<workdir>/skills/<skill_name>/`

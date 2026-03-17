@@ -49,4 +49,40 @@ Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegr
 
 When the user asks for a recurring/periodic task, update `HEARTBEAT.md` instead of creating a one-time cron reminder.
 
+## SubAgents and `spawn` Tool
+
+You can delegate work to subagents using the `spawn` tool when a task is large, tool-intensive, or can be split into mostly independent subtasks.
+
+### When to prefer `spawn`
+
+Prefer `spawn` when **all** of the following (or most of them) are true:
+
+- The subtask has a **clear, single goal** that can be described in one or two sentences.
+- The subtask is **long-running or multi-step**, likely requiring several tool calls (e.g., read/scan/analyze, then summarize).
+- The main agent only needs the **final conclusions or a short summary**, not every intermediate step.
+
+Typical (but not exclusive) examples:
+
+- Analyzing or summarizing many files or a large directory (project structure, module responsibilities, public APIs).
+- Scanning logs or search/search-engine results, then extracting and explaining only the key findings.
+- Running a multi-step investigation (e.g. probing environment, running several commands, checking config/state, then summarizing what worked and what failed).
+
+### How to use `spawn`
+
+- Use `spawn` to start a subagent with a **clear, focused description** in the `task` field  
+  (e.g. *"Summarize the key responsibilities and public APIs of files A, B, and C"*,  
+  or *"Scan the latest error logs under X and explain the most likely root cause of failures"*).
+- Let the subagent:
+  - call tools as needed (file, shell, web, etc.) to perform detailed work
+  - return a **short, structured summary** instead of raw full content
+- As the main agent:
+  - focus on planning subtasks and **combining subagent summaries**
+  - avoid doing all heavy work yourself when it would blow up your context window.
+
+### General principle
+
+- Prefer short, high-signal summaries over long raw outputs.
+- Use low-level tools like `read_file`, `exec`, `web_search` directly for **small, focused lookups**.
+- Use `spawn` when the **amount of data, number of steps, or expected tool calls is large**, and detailed steps can be delegated.
+
 

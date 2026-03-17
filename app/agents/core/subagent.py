@@ -130,7 +130,7 @@ class SubAgent(ABC):
         self._max_duplicate_steps = 2   # 最大重复次数，用于检验当前项agent是否挂死
 
         # 工具信息
-        self.available_tools = ToolsFactory()
+        self.available_tools = ToolsFactory(workspace_path=self.workspace_path)
         self.tool_choices = ToolChoice.AUTO
         self._register_tools()
         self.history_messages: List[Message] = []
@@ -339,14 +339,16 @@ When you have completed the task, provide a clear summary of your findings or ac
         """Execute tool calls and handle their results"""
         try:
             for toolcall in tool_calls:
-                result = await self.execute_tool(toolcall)  
-                self.history_messages.append(Message.tool_result_message(result, toolcall.function.name, toolcall.id))
+                content, meta = await self.execute_tool(toolcall)
+                self.history_messages.append(
+                    Message.tool_result_message(content, toolcall.function.name, toolcall.id, metadata=meta)
+                )
         except Exception as e:
             logging.error(f"Error in subagent act process: %s", e)
             raise RuntimeError(str(e))
 
-    async def execute_tool(self, toolcall: ToolCall) -> str:
-        """Execute a single tool call with robust error handling"""
+    async def execute_tool(self, toolcall: ToolCall) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """执行单次工具调用"""
         if not toolcall or not toolcall.function:
             raise ValueError("Invalid tool call format")
             
@@ -357,8 +359,7 @@ When you have completed the task, provide a clear summary of your findings or ac
         try:
             args = json.loads(toolcall.function.arguments or "{}")
             tool_result = await self.available_tools.execute(tool_name=name, tool_params=args)
-            return f"{tool_result.result}"
-
+            return (f"{tool_result.result}", getattr(tool_result, "metadata", None))
         except json.JSONDecodeError:
             logging.error(f"Invalid JSON arguments for tool '{name}'")
             raise ValueError(f"Invalid JSON arguments for tool '{name}'")
