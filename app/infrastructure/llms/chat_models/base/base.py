@@ -1,11 +1,12 @@
 import asyncio
 import json
+import logging
 import os
 import random
 import time
-from abc import ABC, abstractmethod
+from abc import ABC,abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Literal, Optional, Union, AsyncGenerator, Protocol, Tuple
+from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Protocol,Tuple,Union
 from urllib.parse import urljoin
 import json_repair
 import openai
@@ -13,10 +14,8 @@ import requests
 from openai import OpenAI
 from openai.lib.azure import AzureOpenAI
 from pydantic import BaseModel
-import asyncio
-import logging
 from app.utils.common import is_chinese
-from app.infrastructure.llms.chat_models.schemes import ChatResponse, AskToolResponse
+from app.infrastructure.llms.chat_models.schemes import AskToolResponse,ChatResponse,ModelLimits,TokenUsage
 
 
 # 重试配置常量
@@ -45,6 +44,11 @@ class LLM(ABC):
         self.language = language
         self.configs = kwargs
         self.max_length = kwargs.get("max_length", 8192)
+        self.limits = ModelLimits(
+            context_limit=(kwargs.get("context_limit") if isinstance(kwargs.get("context_limit"), int) else None),
+            max_output_tokens=(kwargs.get("max_tokens") if isinstance(kwargs.get("max_tokens"), int) else None),
+            max_input_tokens=(kwargs.get("max_input_tokens") if isinstance(kwargs.get("max_input_tokens"), int) else None),
+        )
 
     def _format_message(
         self,
@@ -72,7 +76,7 @@ class LLM(ABC):
                   user_question: str,
                   history: List[Dict[str, Any]] = None,
                   with_think: Optional[bool] = False,
-                  **kwargs) -> ChatResponse:
+                  **kwargs) -> Tuple[ChatResponse, TokenUsage]:
         """执行聊天对话，子类必须实现
         
         Args:
@@ -94,7 +98,7 @@ class LLM(ABC):
                 user_question: str,
                 history: List[Dict[str, Any]] = None,
                 with_think: Optional[bool] = False,
-                **kwargs) -> Tuple[AsyncGenerator[str, None], int]:
+                **kwargs) -> Tuple[AsyncGenerator[str, None], TokenUsage]:
         """执行聊天对话，子类必须实现
         
         Args:
@@ -118,7 +122,7 @@ class LLM(ABC):
                        tools: Optional[List[dict]] = None,
                        tool_choice: Literal["none", "auto", "required"] = "auto",
                        with_think: Optional[bool] = False,
-                       **kwargs) -> AskToolResponse:
+                       **kwargs) -> Tuple[AskToolResponse, TokenUsage]:
         """执行工具调用，子类必须实现
         
         Args:
@@ -143,7 +147,7 @@ class LLM(ABC):
                        tools: Optional[List[dict]] = None,
                        tool_choice: Literal["none", "auto", "required"] = "auto",
                        with_think: Optional[bool] = False,
-                       **kwargs) -> Tuple[AsyncGenerator[str, None], int]:
+                       **kwargs) -> Tuple[AsyncGenerator[str, None], TokenUsage]:
         """执行工具调用，子类必须实现
         
         Args:

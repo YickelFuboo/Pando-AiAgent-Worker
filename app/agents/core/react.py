@@ -210,7 +210,7 @@ class ReActAgent(BaseAgent):
                 self._current_step += 1
 
                 # 模型思考和工具调度
-                content, tool_calls, tokens = await self.think(llm, question)
+                content, tool_calls, usage = await self.think(llm, question)
                 if not tool_calls:
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(original_question))
@@ -225,7 +225,7 @@ class ReActAgent(BaseAgent):
                     await self.act(tool_calls)
 
                 # 检查上下文是否溢出，需要压缩
-                if SessionCompaction.is_overflow(tokens=tokens, llm=llm):
+                if SessionCompaction.is_overflow(usage=usage, llm=llm):
                     await SESSION_MANAGER.compact_session(
                         self.session_id,
                         keep_last_n=4,
@@ -258,14 +258,14 @@ class ReActAgent(BaseAgent):
                     logging.warning("Memory consolidate_memory (background) failed: %s", e)
             asyncio.create_task(memory_manager.consolidate_memory()).add_done_callback(_on_consolidate_done)
 
-    async def think(self, llm: Any, question: str) -> Tuple[str, List[ToolCall], int]:
-        """Think about the question. Returns (content, tool_calls, overflow_tokens)."""
+    async def think(self, llm: Any, question: str) -> Tuple[str, List[ToolCall], Any]:
+        """Think about the question. Returns (content, tool_calls, usage)."""
         history = await self.get_history_context()
         response = None
         tool_calls: List[ToolCall] = []
         try:
             if self.tool_choices == ToolChoice.NONE:
-                response = await llm.chat(
+                response, usage = await llm.chat(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
@@ -275,7 +275,7 @@ class ReActAgent(BaseAgent):
                 if not response.success:
                     raise Exception(response.content)
             else:
-                response = await llm.ask_tools(
+                response, usage = await llm.ask_tools(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
@@ -300,10 +300,7 @@ class ReActAgent(BaseAgent):
                 if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
 
-            tokens = (response.input_tokens or 0) + (response.cache_read_tokens or 0) + (response.cache_write_tokens or 0)
-            if tokens <= 0:
-                tokens = response.total_tokens or 0
-            return response.content, tool_calls, tokens
+            return response.content, tool_calls, usage
 
         except Exception as e:
             logging.error(f"Error in agent(%s) thinking process: %s", self.agent_type, e)

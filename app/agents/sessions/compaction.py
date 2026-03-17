@@ -1,10 +1,11 @@
 """会话压缩：当 token 接近上下文上限时，用摘要替代长历史。"""
 import logging
-from typing import Optional
-from app.agents.sessions.message import Message, Role
+from typing import List,Optional
+from app.agents.sessions.message import Message,Role
 from app.agents.sessions.session import Session
 from app.config.settings import settings
 from app.infrastructure.llms.chat_models.factory import llm_factory
+from app.infrastructure.llms.chat_models.schemes import TokenUsage
 
 
 class SessionCompaction:
@@ -40,7 +41,8 @@ When constructing the summary, try to stick to this template:
 
     @staticmethod
     def is_overflow(
-        tokens: int,
+        *,
+        usage: TokenUsage,
         llm: Optional[object] = None,
     ) -> bool:
         """判断当前 token 数是否接近上下文上限，需要触发压缩。
@@ -58,10 +60,9 @@ When constructing the summary, try to stick to this template:
         llm_context_limit = None
         llm_max_output_tokens = None
         if llm is not None:
-            cfg = getattr(llm, "configs", None)
-            if isinstance(cfg, dict):
-                llm_context_limit = cfg.get("context_limit")
-                llm_max_output_tokens = cfg.get("max_tokens")
+            limits = getattr(llm, "limits", None)
+            llm_context_limit = getattr(limits, "context_limit", None)
+            llm_max_output_tokens = getattr(limits, "max_output_tokens", None)
 
         limit = llm_context_limit or getattr(settings, "compaction_context_limit", 128_000)
         if limit <= 0:
@@ -74,7 +75,7 @@ When constructing the summary, try to stick to this template:
         usable = limit - max_out - res  # 可用空间 = 上下文上限 - 下轮最大输出 token 数 - 为压缩预留的 token 缓冲
         if usable <= 0:
             return False
-        return tokens >= usable  # 当前模型交互 token 数是否超过可用空间
+        return usage.overflow_basis() >= usable  # 当前模型交互 token 数是否超过可用空间
 
 
     @staticmethod
@@ -102,28 +103,33 @@ When constructing the summary, try to stick to this template:
             return True
         
         llm = llm_factory.create_model(provider=session.llm_provider, model=session.llm_model)
-        history = [m.to_context() for m in to_summarize]
-        compact_system = "You are a session summarization agent. Summarize the conversation concisely."
         try:
-            response = await llm.chat(
-                system_prompt=compact_system,
-                user_prompt="",
-                user_question=SessionCompaction.COMPACTION_PROMPT,
-                history=history,
-                temperature=0.3,
-            )
-            if not response or not response.success or not response.content:
+            summary_message = await SessionCompaction.compact_messages(llm=llm,messages=to_summarize)
+            if summary_message is None or not (summary_message.content or "").strip():
                 logging.warning("Compaction produced empty or failed summary for session %s", session.session_id)
                 return False
-            summary_message = Message(
-                role=Role.ASSISTANT,
-                content=response.content.strip(),
-            )
             SessionCompaction.apply_compaction_to_session(session, summary_message, keep_last_n=keep_last_n)
             return True
         except Exception as e:
             logging.error("Compaction failed for session %s: %s", session.session_id, e)
             return False
+
+    @staticmethod
+    async def compact_messages(*,llm:object,messages:List[Message])->Optional[Message]:
+        if not messages:
+            return None
+        history=[m.to_context() for m in messages]
+        compact_system="You are a session summarization agent. Summarize the conversation concisely."
+        response,usage = await llm.chat(
+            system_prompt=compact_system,
+            user_prompt="",
+            user_question=SessionCompaction.COMPACTION_PROMPT,
+            history=history,
+            temperature=0.3,
+        )
+        if not response or not response.success or not response.content:
+            return None
+        return Message(role=Role.ASSISTANT,content=response.content.strip())
 
 
     @staticmethod

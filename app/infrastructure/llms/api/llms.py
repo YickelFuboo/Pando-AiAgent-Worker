@@ -136,7 +136,7 @@ async def get_tts_models():
 
 # ==================== 聊天模型API ====================
 
-@router.post("/chat", response_model=ChatResponse, summary="聊天对话", tags=["聊天模型"])
+@router.post("/chat", summary="聊天对话", tags=["聊天模型"])
 async def chat(request: ChatRequest):
     """聊天对话接口"""
     try:
@@ -145,16 +145,13 @@ async def chat(request: ChatRequest):
         if not model:
             raise HTTPException(status_code=400, detail="无法创建模型实例")
         
-        response, token_count = await model.chat(
+        response, usage = await model.chat(
             system_prompt=request.system_prompt,
             user_prompt=request.user_prompt,
             user_question=request.user_question
         )
         
-        return ChatResponse(
-            content=response.content if hasattr(response, 'content') else str(response),
-            token_count=token_count
-        )
+        return response
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"聊天请求失败: {str(e)}")
@@ -170,7 +167,7 @@ async def chat_stream(request: ChatRequest):
             raise HTTPException(status_code=400, detail="无法创建模型实例")
         
         async def generate():
-            stream_generator, _ = await model.chat_stream(
+            stream_generator, _usage = await model.chat_stream(
                 system_prompt=request.system_prompt,
                 user_prompt=request.user_prompt,
                 user_question=request.user_question

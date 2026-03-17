@@ -30,7 +30,7 @@ async def chat(request: UserRequest):
 
         llm = llm_factory.create_model(provider=request.llm_provider, model=request.llm_model)
         history = await SESSION_MANAGER.get_context(request.session_id, max_messages=20)
-        response = await llm.chat(
+        response, usage = await llm.chat(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=USER_PROMPT,
             user_question=request.content,

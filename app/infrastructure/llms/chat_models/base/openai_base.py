@@ -2,11 +2,11 @@ import asyncio
 import json
 import time
 import logging
-from typing import Dict, Optional, List, Literal, Union, AsyncGenerator, Any, Tuple
+from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Tuple,Union
 from openai import AsyncOpenAI
 from openai import RateLimitError, APITimeoutError, APIConnectionError, InternalServerError
 from app.infrastructure.llms.chat_models.base.base import LLM, MAX_RETRY_ATTEMPTS
-from app.infrastructure.llms.chat_models.schemes import ChatResponse, AskToolResponse, ToolInfo
+from app.infrastructure.llms.chat_models.schemes import AskToolResponse,ChatResponse,TokenUsage,ToolInfo
 from app.infrastructure.llms.utils import num_tokens_from_string
 
 
@@ -51,10 +51,11 @@ class OpenAIBase(LLM):
             logging.error(f"Error in _format_openai_message: {e}")
             raise e
 
-    def _extract_tokens(self, response) -> Tuple[int, int, int, int, int]:
-        usage = getattr(response, "usage", None)
+    def _extract_usage(self, response)->TokenUsage:
+        """从响应中提取 token 使用明细（尽量兼容不同 SDK）。"""
+        usage=getattr(response,"usage",None)
         if usage is None:
-            return 0, 0, 0, 0, 0
+            return TokenUsage()
         
         prompt_tokens = getattr(usage, "prompt_tokens", None)
         completion_tokens = getattr(usage, "completion_tokens", None)
@@ -69,18 +70,17 @@ class OpenAIBase(LLM):
             cache_read_tokens = 0
         if not isinstance(cache_write_tokens, int):
             cache_write_tokens = 0
-        if isinstance(total_tokens, int) and total_tokens > 0:
-            in_tok = prompt_tokens if isinstance(prompt_tokens, int) else (input_tokens if isinstance(input_tokens, int) else 0)
-            out_tok = completion_tokens if isinstance(completion_tokens, int) else (output_tokens if isinstance(output_tokens, int) else 0)
-            return in_tok, out_tok, cache_read_tokens, cache_write_tokens, total_tokens
-        if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-            total = prompt_tokens + completion_tokens + cache_read_tokens + cache_write_tokens
-            return prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens, total
-        if isinstance(input_tokens, int) and isinstance(output_tokens, int):
-            total = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens
-            return input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total
-        
-        return 0, 0, cache_read_tokens, cache_write_tokens, 0
+        if isinstance(total_tokens,int) and total_tokens>0:
+            in_tok=prompt_tokens if isinstance(prompt_tokens,int) else (input_tokens if isinstance(input_tokens,int) else 0)
+            out_tok=completion_tokens if isinstance(completion_tokens,int) else (output_tokens if isinstance(output_tokens,int) else 0)
+            return TokenUsage(input_tokens=in_tok,output_tokens=out_tok,cache_read_tokens=cache_read_tokens,cache_write_tokens=cache_write_tokens,total_tokens=total_tokens)
+        if isinstance(prompt_tokens,int) and isinstance(completion_tokens,int):
+            total=prompt_tokens+completion_tokens+cache_read_tokens+cache_write_tokens
+            return TokenUsage(input_tokens=prompt_tokens,output_tokens=completion_tokens,cache_read_tokens=cache_read_tokens,cache_write_tokens=cache_write_tokens,total_tokens=total)
+        if isinstance(input_tokens,int) and isinstance(output_tokens,int):
+            total=input_tokens+output_tokens+cache_read_tokens+cache_write_tokens
+            return TokenUsage(input_tokens=input_tokens,output_tokens=output_tokens,cache_read_tokens=cache_read_tokens,cache_write_tokens=cache_write_tokens,total_tokens=total)
+        return TokenUsage(cache_read_tokens=cache_read_tokens,cache_write_tokens=cache_write_tokens)
     
     async def chat(self, 
                   system_prompt: str,
@@ -88,7 +88,7 @@ class OpenAIBase(LLM):
                   user_question: str,
                   history: List[Dict[str, Any]] = None,
                   with_think: Optional[bool] = False,
-                  **kwargs) -> ChatResponse:
+                  **kwargs) -> Tuple[ChatResponse, TokenUsage]:
         """OpenAI兼容的聊天实现，支持失败重试"""
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -108,10 +108,7 @@ class OpenAIBase(LLM):
                 
                 # 检查响应结构是否有效
                 if (not response.choices or not response.choices[0].message or  not response.choices[0].message.content):
-                    return ChatResponse(
-                        content="Invalid response structure",
-                        success=False
-                    )
+                    return ChatResponse(content="Invalid response structure",success=False),TokenUsage()
                 
                 # 获取回答内容
                 # ps：非流式场景下，即便开启了reasoning_mode: "deep"，也不会返回reasoning_content字段，所有内容
@@ -121,36 +118,21 @@ class OpenAIBase(LLM):
                 # 检查是否因长度限制截断
                 if response.choices[0].finish_reason == "length":
                     content = self._add_truncate_notify(content)
-                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens = self._extract_tokens(response)
-
-                return ChatResponse(
-                    content=content,
-                    success=True,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cache_read_tokens=cache_read_tokens,
-                    cache_write_tokens=cache_write_tokens,
-                    total_tokens=total_tokens,
-                )
+                usage=self._extract_usage(response)
+                return ChatResponse(content=content,success=True), usage
             
             except Exception as e:
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in chat (attempt {attempt + 1}): {e}")
-                    return ChatResponse(
-                        content="llm error: " + str(e),
-                        success=False
-                    )
+                    return ChatResponse(content="llm error: " + str(e),success=False),TokenUsage()
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
                 logging.warning(f"Retryable error in chat (attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {delay:.2f}s...")
                 await asyncio.sleep(delay)
         
-        return ChatResponse(
-            content="llm error: Unexpected error: max retries exceeded",
-            success=False
-        )
+        return ChatResponse(content="llm error: Unexpected error: max retries exceeded",success=False),TokenUsage()
 
     
     async def chat_stream(self, 
@@ -159,7 +141,7 @@ class OpenAIBase(LLM):
                   user_question: str,
                   history: List[Dict[str, Any]] = None,
                   with_think: Optional[bool] = False,
-                  **kwargs) -> Tuple[AsyncGenerator[str, None], int]:
+                  **kwargs) -> Tuple[AsyncGenerator[str, None], TokenUsage]:
         """OpenAI兼容的聊天流式实现，支持失败重试"""
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -180,12 +162,12 @@ class OpenAIBase(LLM):
                 
                 # 检查响应结构是否有效
                 if not response:
-                    return self._create_error_stream("Invalid response structure"), 0
+                    return self._create_error_stream("Invalid response structure"), TokenUsage()
                 
-                total_tokens = 0
+                usage = TokenUsage()
                 
                 async def stream_response():
-                    nonlocal total_tokens
+                    nonlocal usage
                     reasoning_start = False  
                     
                     try:
@@ -211,7 +193,7 @@ class OpenAIBase(LLM):
                                 content += chunk.choices[0].delta.content 
 
                             if content:
-                                total_tokens += num_tokens_from_string(content)
+                                usage.total_tokens += num_tokens_from_string(content)
 
                             # 如果超长截断，则添加截断提示
                             if chunk.choices[0].finish_reason == "length":
@@ -226,20 +208,20 @@ class OpenAIBase(LLM):
                         raise
                 
                 # 返回流式响应和token数量
-                return stream_response(), total_tokens
+                return stream_response(), usage
 
             except Exception as e:
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in chat_stream (attempt {attempt + 1}): {e}")
-                    return self._create_error_stream(str(e)), 0
+                    return self._create_error_stream(str(e)), TokenUsage()
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
                 logging.warning(f"Retryable error in chat_stream (attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {delay:.2f}s...")
                 await asyncio.sleep(delay)
         
-        return self._create_error_stream("Unexpected error: max retries exceeded"), 0
+        return self._create_error_stream("Unexpected error: max retries exceeded"), TokenUsage()
 
 
     async def ask_tools(self,
@@ -250,13 +232,13 @@ class OpenAIBase(LLM):
                        tools: Optional[List[dict]] = None,
                        tool_choice: Literal["none", "auto", "required"] = "auto",
                        with_think: Optional[bool] = False,
-                       **kwargs) -> AskToolResponse:
+                       **kwargs) -> Tuple[AskToolResponse, TokenUsage]:
         """OpenAI兼容的工具调用实现，支持失败重试"""
         if tool_choice == "required" and not tools:
             return AskToolResponse(
                 content="tool_choice 为 'required' 时必须提供 tools",
                 success=False
-            )
+            ),TokenUsage()
         
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -279,10 +261,7 @@ class OpenAIBase(LLM):
                 
                 # 检查响应结构是否有效
                 if (not response.choices or not response.choices[0].message):
-                    return AskToolResponse(
-                        content="llm error: Invalid response structure",
-                        success=False
-                    )
+                    return AskToolResponse(content="llm error: Invalid response structure",success=False),TokenUsage()
                 
                 msg = response.choices[0].message
                 tool_calls = []
@@ -300,36 +279,21 @@ class OpenAIBase(LLM):
                             args=args
                         ))
                 
-                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens = self._extract_tokens(response)
-                return AskToolResponse(
-                    content=msg.content or "",
-                    tool_calls=tool_calls,
-                    success=True,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cache_read_tokens=cache_read_tokens,
-                    cache_write_tokens=cache_write_tokens,
-                    total_tokens=total_tokens,
-                )
+                usage=self._extract_usage(response)
+                return AskToolResponse(content=msg.content or "",tool_calls=tool_calls,success=True), usage
 
             except Exception as e:
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in ask_tools (attempt {attempt + 1}): {e}")
-                    return AskToolResponse(
-                        content="llm error: " + str(e),
-                        success=False
-                    )
+                    return AskToolResponse(content="llm error: " + str(e),success=False),TokenUsage()
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
                 logging.warning(f"Retryable error in ask_tools (attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {delay:.2f}s...")
                 await asyncio.sleep(delay)
         
-        return AskToolResponse(
-            content="llm error: Unexpected error: max retries exceeded",
-            success=False
-        )
+        return AskToolResponse(content="llm error: Unexpected error: max retries exceeded",success=False),TokenUsage()
 
 
     async def ask_tools_stream(self,
@@ -340,10 +304,10 @@ class OpenAIBase(LLM):
                        tools: Optional[List[dict]] = None,
                        tool_choice: Literal["none", "auto", "required"] = "auto",
                        with_think: Optional[bool] = False,
-                       **kwargs) -> Tuple[AsyncGenerator[str, None], int]:
+                       **kwargs) -> Tuple[AsyncGenerator[str, None], TokenUsage]:
         """OpenAI兼容的工具调用流式实现，支持失败重试"""
         if tool_choice == "required" and not tools:
-            return self._create_error_stream("llm error: tool_choice 为 'required' 时必须提供 tools"), 0
+            return self._create_error_stream("llm error: tool_choice 为 'required' 时必须提供 tools"), TokenUsage()
         
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -366,12 +330,12 @@ class OpenAIBase(LLM):
                 
                 # 检查响应结构是否有效
                 if not response:
-                    return self._create_error_stream("llm error: Invalid response structure"), 0
+                    return self._create_error_stream("llm error: Invalid response structure"), TokenUsage()
                 
-                total_tokens = 0
+                usage = TokenUsage()
                 
                 async def stream_response():
-                    nonlocal total_tokens
+                    nonlocal usage
                     reasoning_start = False
                     tool_calls_collected = {}  
                     
@@ -383,7 +347,7 @@ class OpenAIBase(LLM):
                                 continue
                             
                             if content:
-                                total_tokens += num_tokens_from_string(content)
+                                usage.total_tokens += num_tokens_from_string(content)
 
                             # 拼接think部分，开启"reasoning_mode": "deep"后有本内容
                             if hasattr(chunk.choices[0].delta, "reasoning_content") and chunk.choices[0].delta.reasoning_content is not None:
@@ -426,7 +390,7 @@ class OpenAIBase(LLM):
                         # 处理收集到的工具调用，格式化为字符串
                         if tool_calls_collected:
                             tool_calls_str = self._format_tool_calls(tool_calls_collected)
-                            total_tokens += num_tokens_from_string(tool_calls_str)
+                            usage.total_tokens += num_tokens_from_string(tool_calls_str)
                             yield tool_calls_str
                     
                     except Exception as e:
@@ -436,17 +400,17 @@ class OpenAIBase(LLM):
                         raise
                 
                 # 返回流式响应和token数量
-                return stream_response(), total_tokens
+                return stream_response(), usage
 
             except Exception as e:
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in ask_tools_stream (attempt {attempt + 1}): {e}")
-                    return self._create_error_stream("llm error: " + str(e)), 0
+                    return self._create_error_stream("llm error: " + str(e)), TokenUsage()
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
                 logging.warning(f"Retryable error in ask_tools_stream (attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {delay:.2f}s...")
                 await asyncio.sleep(delay)
         
-        return self._create_error_stream("llm error: Unexpected error: max retries exceeded"), 0
+        return self._create_error_stream("llm error: Unexpected error: max retries exceeded"), TokenUsage()
