@@ -231,6 +231,8 @@ class ReActAgent(BaseAgent):
                         keep_last_n=4,
                     )
 
+                await SESSION_MANAGER.prune_session(self.session_id)
+
                 # 检查模型是否进行死循环
                 if await self.is_stuck():
                     self.handle_stuck_state()

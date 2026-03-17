@@ -44,13 +44,22 @@ class Session(BaseModel):
         规则：
         - 若存在 compaction 摘要，则优先使用“最新摘要 + last_compacted 之后的消息”；
         """
+        PRUNED_PLACEHOLDER = "[Old tool result content cleared]"
+
+        def _to_llm_message(m: Message) -> Dict[str, Any]:
+            if m.is_tool_result and isinstance(m.metadata, dict) and m.metadata.get("pruned_at"):
+                ctx = m.to_context()
+                ctx["content"] = PRUNED_PLACEHOLDER
+                return ctx
+            return m.to_context()
+
         if self.compaction is not None and self.last_compacted > 0:
             tail = self.messages[self.last_compacted:]
             sliced = tail[-max_messages:]
             summary = self.compaction.to_context()
-            return [summary] + [m.to_context() for m in sliced]
+            return [summary] + [_to_llm_message(m) for m in sliced]
         sliced = self.messages[-max_messages:]
-        return [m.to_context() for m in sliced]
+        return [_to_llm_message(m) for m in sliced]
 
     def to_information(self) -> Dict[str, Any]:
         """会话关键信息，供 API 列表等使用。"""

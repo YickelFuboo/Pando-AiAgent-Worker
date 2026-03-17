@@ -174,13 +174,27 @@ class SessionManager:
         if not session:
             logging.warning("Cannot compact: session not found: %s", session_id)
             return False
-        ok = await SessionCompaction.process(session, keep_last_n=keep_last_n)
+        ok = await SessionCompaction.compact(session, keep_last_n=keep_last_n)
         if not ok:
             return False
         session.last_updated = datetime.now()
         await self._store.save(session)
         logging.info("Compacted session %s (keep_last_n=%d)", session_id, keep_last_n)
         return True
+
+    async def prune_session(self, session_id: str) -> int:
+        """对会话执行 prune：标记旧 tool result 输出为已清空（不删历史）。"""
+        session = await self.get_session(session_id)
+        if not session:
+            logging.warning("Cannot prune: session not found: %s", session_id)
+            return 0
+        pruned_tokens = SessionCompaction.prune(session)
+        if pruned_tokens <= 0:
+            return 0
+        session.last_updated = datetime.now()
+        await self._store.save(session)
+        logging.info("Pruned session %s (tokens=%d)", session_id, pruned_tokens)
+        return pruned_tokens
 
 
 SESSION_MANAGER = SessionManager()

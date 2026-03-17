@@ -1,11 +1,14 @@
 """会话压缩：当 token 接近上下文上限时，用摘要替代长历史。"""
 import logging
+import time
 from typing import List,Optional
 from app.agents.sessions.message import Message,Role
 from app.agents.sessions.session import Session
 from app.config.settings import settings
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.infrastructure.llms.chat_models.schemes import TokenUsage
+from app.infrastructure.llms.utils import num_tokens_from_string
+from app.agents.sessions.manager import SESSION_MANAGER
 
 
 class SessionCompaction:
@@ -79,7 +82,7 @@ When constructing the summary, try to stick to this template:
 
 
     @staticmethod
-    async def process(
+    async def compact(
         session: Session,
         keep_last_n: int = 0,
     ) -> bool:
@@ -115,12 +118,13 @@ When constructing the summary, try to stick to this template:
             return False
 
     @staticmethod
-    async def compact_messages(*,llm:object,messages:List[Message])->Optional[Message]:
+    async def compact_messages(*, llm:object, messages:List[Message])->Optional[Message]:
+        """生成会话摘要：使用 LLM 生成会话摘要。"""
         if not messages:
             return None
         history=[m.to_context() for m in messages]
         compact_system="You are a session summarization agent. Summarize the conversation concisely."
-        response,usage = await llm.chat(
+        response, usage = await llm.chat(
             system_prompt=compact_system,
             user_prompt="",
             user_question=SessionCompaction.COMPACTION_PROMPT,
@@ -130,7 +134,6 @@ When constructing the summary, try to stick to this template:
         if not response or not response.success or not response.content:
             return None
         return Message(role=Role.ASSISTANT,content=response.content.strip())
-
 
     @staticmethod
     def apply_compaction_to_session(
@@ -153,3 +156,51 @@ When constructing the summary, try to stick to this template:
         compact_until = max(0, len(msgs) - max(0, keep_last_n))
         session.compaction = summary_message
         session.last_compacted = compact_until
+
+    @staticmethod
+    async def prune(session_id: str) -> int:
+        """修剪会话历史：移除旧工具输出，保护最近工具输出窗口。
+            此处仅为Message打上pruned_at时间戳，后续构造context时根据该时间戳修剪旧工具提供给模型的内容。
+        """
+        if not getattr(settings, "compaction_prune", True):
+            return 0
+
+        session = await SESSION_MANAGER.get_session(session_id)
+        if not session:
+            return 0
+
+        protect = int(getattr(settings, "compaction_prune_protect", 40_000) or 40_000)
+        minimum = int(getattr(settings, "compaction_prune_minimum", 20_000) or 20_000)
+        protected_tools_raw = getattr(settings, "compaction_prune_protected_tools", "skill") or "skill"
+        protected_tools = {t.strip() for t in protected_tools_raw.split(",") if t.strip()}
+
+        candidates: List[Message] = []
+        candidates_tokens = 0
+        seen_tokens = 0
+
+        start = session.last_compacted if (session.compaction is not None and session.last_compacted > 0) else 0
+        scan = session.messages[start:]
+        for msg in reversed(scan):
+            if not msg.is_tool_result:
+                continue
+            if isinstance(msg.metadata, dict) and msg.metadata.get("pruned_at"):
+                break
+            if msg.name in protected_tools:
+                continue
+            t = num_tokens_from_string(msg.content or "")
+            seen_tokens += t
+            if seen_tokens <= protect:
+                continue
+            candidates.append(msg)
+            candidates_tokens += t
+
+        if candidates_tokens < minimum:
+            return 0
+
+        now_ms = int(time.time() * 1000)
+        for msg in candidates:
+            meta = msg.metadata if isinstance(msg.metadata, dict) else {}
+            meta["pruned_at"] = now_ms
+            msg.metadata = meta
+        return candidates_tokens
+
