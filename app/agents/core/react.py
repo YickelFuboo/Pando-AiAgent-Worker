@@ -9,6 +9,7 @@ from app.agents.sessions.message import Message, ToolCall, Function
 from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.sessions.compaction import SessionCompaction
 from app.infrastructure.llms.chat_models.factory import llm_factory
+from app.infrastructure.llms.chat_models.schemes import TokenUsage
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
 from app.agents.core.subagent import SubAgentManager
@@ -206,32 +207,35 @@ class ReActAgent(BaseAgent):
             # 设置添加用户消息到history标志
             content = ""
             had_push_user_message = False
+            context_overflow_recovered = False
             while (self._current_step < self._max_steps and self._state != AgentState.FINISHED and not self._stop_requested):
                 self._current_step += 1
 
                 # 模型思考和工具调度
                 content, tool_calls, usage = await self.think(llm, question)
-                if not tool_calls:
-                    if not had_push_user_message:
-                        await self.push_history_message(Message.user_message(original_question))
-                        had_push_user_message = True
-                    await self.push_history_message_and_notify_user(Message.assistant_message(content))
-                    break
-                else:
+                if tool_calls:                    
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(original_question))
                         had_push_user_message = True
                     await self.push_history_message_and_notify_user(Message.tool_call_message(content, tool_calls))
                     await self.act(tool_calls)
+                    
+                else:
+                    if not had_push_user_message:
+                        await self.push_history_message(Message.user_message(original_question))
+                        had_push_user_message = True
+                    
+                    if self._is_context_overflow_content(content) and not context_overflow_recovered:
+                        # 强制压缩上下文后，继续思考
+                        await self._handle_context_overflow(usage, llm, force=True)
+                        context_overflow_recovered = True
+                        continue
+                    else:
+                        await self.push_history_message_and_notify_user(Message.assistant_message(content))
+                        break
 
                 # 检查上下文是否溢出，需要压缩
-                if SessionCompaction.is_overflow(usage=usage, llm=llm):
-                    await SESSION_MANAGER.compact_session(
-                        self.session_id,
-                        keep_last_n=4,
-                    )
-
-                await SESSION_MANAGER.prune_session(self.session_id)
+                await self._handle_context_overflow(usage, llm)
 
                 # 检查模型是否进行死循环
                 if await self.is_stuck():
@@ -260,7 +264,7 @@ class ReActAgent(BaseAgent):
                     logging.warning("Memory consolidate_memory (background) failed: %s", e)
             asyncio.create_task(memory_manager.consolidate_memory()).add_done_callback(_on_consolidate_done)
 
-    async def think(self, llm: Any, question: str) -> Tuple[str, List[ToolCall], Any]:
+    async def think(self, llm: Any, question: str) -> Tuple[str, List[ToolCall], TokenUsage]:
         """Think about the question. Returns (content, tool_calls, usage)."""
         history = await self.get_history_context()
         response = None
@@ -359,3 +363,18 @@ class ReActAgent(BaseAgent):
 
         self._state = AgentState.FINISHED
         logging.info(f"Task completion or phased completion by special tool '{name}'")
+
+    def _is_context_overflow_content(self, content: str) -> bool:
+        if not content:
+            return False
+        return "context_overflow" in content.lower()
+
+    async def _handle_context_overflow(self, usage: TokenUsage, llm: Any, force: bool = False) -> None:
+        # 检查上下文是否溢出，需要压缩
+        if SessionCompaction.is_overflow(usage=usage, llm=llm) or force: # force为True时，强制压缩
+            await SESSION_MANAGER.compact_session(
+                self.session_id,
+                keep_last_n=4,
+            )
+
+        await SESSION_MANAGER.prune_session(self.session_id)

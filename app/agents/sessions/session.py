@@ -46,7 +46,7 @@ class Session(BaseModel):
         """
         PRUNED_PLACEHOLDER = "[Old tool result content cleared]"
 
-        def _to_llm_message(m: Message) -> Dict[str, Any]:
+        def _to_pruned_message(m: Message) -> Dict[str, Any]:
             if m.is_tool_result and isinstance(m.metadata, dict) and m.metadata.get("pruned_at"):
                 ctx = m.to_context()
                 ctx["content"] = PRUNED_PLACEHOLDER
@@ -57,9 +57,9 @@ class Session(BaseModel):
             tail = self.messages[self.last_compacted:]
             sliced = tail[-max_messages:]
             summary = self.compaction.to_context()
-            return [summary] + [_to_llm_message(m) for m in sliced]
+            return [summary] + [_to_pruned_message(m) for m in sliced]
         sliced = self.messages[-max_messages:]
-        return [_to_llm_message(m) for m in sliced]
+        return [_to_pruned_message(m) for m in sliced]
 
     def to_information(self) -> Dict[str, Any]:
         """会话关键信息，供 API 列表等使用。"""

@@ -158,15 +158,11 @@ When constructing the summary, try to stick to this template:
         session.last_compacted = compact_until
 
     @staticmethod
-    async def prune(session_id: str) -> int:
+    async def prune(session: Session) -> int:
         """修剪会话历史：移除旧工具输出，保护最近工具输出窗口。
             此处仅为Message打上pruned_at时间戳，后续构造context时根据该时间戳修剪旧工具提供给模型的内容。
         """
         if not getattr(settings, "compaction_prune", True):
-            return 0
-
-        session = await SESSION_MANAGER.get_session(session_id)
-        if not session:
             return 0
 
         protect = int(getattr(settings, "compaction_prune_protect", 40_000) or 40_000)

@@ -122,6 +122,9 @@ class OpenAIBase(LLM):
                 return ChatResponse(content=content,success=True), usage
             
             except Exception as e:
+                if self._is_context_overflow_error(e):
+                    logging.error(f"Error in chat (context overflow): {e}")
+                    return ChatResponse(content="llm error: context_overflow", success=False), TokenUsage()
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in chat (attempt {attempt + 1}): {e}")
@@ -211,6 +214,9 @@ class OpenAIBase(LLM):
                 return stream_response(), usage
 
             except Exception as e:
+                if self._is_context_overflow_error(e):
+                    logging.error(f"Error in chat_stream (context overflow): {e}")
+                    return self._create_error_stream("llm error: context_overflow"), TokenUsage()
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in chat_stream (attempt {attempt + 1}): {e}")
@@ -283,6 +289,9 @@ class OpenAIBase(LLM):
                 return AskToolResponse(content=msg.content or "",tool_calls=tool_calls,success=True), usage
 
             except Exception as e:
+                if self._is_context_overflow_error(e):
+                    logging.error(f"Error in ask_tools (context overflow): {e}")
+                    return AskToolResponse(content="llm error: context_overflow", success=False), TokenUsage()
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in ask_tools (attempt {attempt + 1}): {e}")
@@ -403,6 +412,9 @@ class OpenAIBase(LLM):
                 return stream_response(), usage
 
             except Exception as e:
+                if self._is_context_overflow_error(e):
+                    logging.error(f"Error in ask_tools_stream (context overflow): {e}")
+                    return self._create_error_stream("llm error: context_overflow"), TokenUsage()
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in ask_tools_stream (attempt {attempt + 1}): {e}")

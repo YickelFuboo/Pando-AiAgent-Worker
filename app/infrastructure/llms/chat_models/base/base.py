@@ -167,8 +167,10 @@ class LLM(ABC):
     
     def _is_retryable_error(self, error: Exception) -> bool:
         """判断错误是否可重试）"""
-        error_str = str(error).lower()
+        if self._is_context_overflow_error(error):
+            return False
         
+        error_str = str(error).lower()        
         # 扩展重试条件，包含更多网络相关错误
         retryable_keywords = [
             'rate limit', '429', 'server', '502', '503', '504', '500',
@@ -178,6 +180,22 @@ class LLM(ABC):
         ]
         
         return any(keyword in error_str for keyword in retryable_keywords)
+
+    def _is_context_overflow_error(self, error: Exception) -> bool:
+        s = str(error).lower()
+        keywords = (
+            "context length",
+            "maximum context",
+            "max context",
+            "context window",
+            "exceeds the context",
+            "exceed context",
+            "too many tokens",
+            "prompt is too long",
+            "input is too long",
+            "context_limit",
+        )
+        return any(k in s for k in keywords)
 
 
     def _get_delay(self, attempt: int = 0):
