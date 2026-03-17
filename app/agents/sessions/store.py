@@ -147,12 +147,9 @@ def _row_to_session(row) -> Session:
     meta = getattr(row, "metadata_", None)
     if meta is None or not isinstance(meta, dict):
         meta = {}
-    compaction = None
-    if isinstance(meta.get("compaction"), dict):
-        compaction = Message(**meta["compaction"])
-    elif isinstance(meta.get("compactions"), list) and meta["compactions"]:
-        compaction = Message(**meta["compactions"][-1])
-    last_compacted = int(meta.get("last_compacted") or 0)
+    compaction_raw = getattr(row, "compaction", None)
+    compaction = Message(**compaction_raw) if isinstance(compaction_raw, dict) else None
+    last_compacted = int(getattr(row, "last_compacted", 0) or 0)
     llm_provider = getattr(row, "llm_provider", None) or ""
     last_consolidated = getattr(row, "last_consolidated", 0) or 0
     agent_type = getattr(row, "agent_type", None) or getattr(row, "session_type", "") or ""
@@ -193,8 +190,8 @@ class DatabaseSessionStore(SessionStore):
     async def save(self, session: Session) -> None:
         messages_json = [msg.model_dump() for msg in session.messages]
         meta = dict(session.metadata or {})
-        meta["compaction"] = (session.compaction.model_dump() if session.compaction is not None else None)
-        meta["last_compacted"] = session.last_compacted or 0
+        compaction_json = (session.compaction.model_dump() if session.compaction is not None else None)
+        last_compacted = session.last_compacted or 0
         async for db in get_db():
             try:
                 r = (
@@ -211,8 +208,10 @@ class DatabaseSessionStore(SessionStore):
                     rec.llm_provider = session.llm_provider or ""
                     rec.llm_model = session.llm_model
                     rec.metadata_ = meta
+                    rec.compaction = compaction_json
                     rec.messages = messages_json
                     rec.last_consolidated = session.last_consolidated
+                    rec.last_compacted = last_compacted
                     rec.last_updated = session.last_updated
                 else:
                     db.add(SessionRecord(
@@ -224,8 +223,10 @@ class DatabaseSessionStore(SessionStore):
                         llm_provider=session.llm_provider or "",
                         llm_model=session.llm_model,
                         metadata_=meta,
+                        compaction=compaction_json,
                         messages=messages_json,
                         last_consolidated=session.last_consolidated,
+                        last_compacted=last_compacted,
                         created_at=session.created_at,
                         last_updated=session.last_updated,
                     ))

@@ -95,7 +95,7 @@ class ClaudeModels(OpenAIBase):
                     return ChatResponse(
                         content="Invalid response structure",
                         success=False
-                    ), 0
+                    )
                 
                 # 获取回答内容
                 content = response.content[0].text.strip()

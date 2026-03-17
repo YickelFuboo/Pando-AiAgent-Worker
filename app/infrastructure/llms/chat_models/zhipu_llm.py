@@ -65,7 +65,7 @@ class ZhiPuModels(OpenAIBase):
                     return ChatResponse(
                         content="Invalid response structure",
                         success=False
-                    ), 0
+                    )
                 
                 # 获取回答内容
                 # ps：非流式场景下，即便开启了reasoning_mode: "deep"，也不会返回reasoning_content字段，所有内容
