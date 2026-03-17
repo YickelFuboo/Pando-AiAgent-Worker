@@ -37,7 +37,7 @@ class ZhiPuModels(OpenAIBase):
                   user_question: str,
                   history: List[Dict[str, Any]] = None,
                   with_think: Optional[bool] = False,
-                  **kwargs) -> Tuple[ChatResponse, int]:
+                  **kwargs) -> ChatResponse:
         """OpenAI兼容的聊天实现，支持失败重试"""
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -75,11 +75,17 @@ class ZhiPuModels(OpenAIBase):
                 # 检查是否因长度限制截断
                 if response.choices[0].finish_reason == "length":
                     content = self._add_truncate_notify(content)
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens = self._extract_tokens(response)
 
                 return ChatResponse(
                     content=content,
-                    success=True
-                ), self._total_token_count(response)
+                    success=True,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                    total_tokens=total_tokens,
+                )
             
             except Exception as e:
                 # 检查是否需要重试
@@ -88,7 +94,7 @@ class ZhiPuModels(OpenAIBase):
                     return ChatResponse(
                         content=str(e),
                         success=False
-                    ), 0
+                    )
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
@@ -98,7 +104,7 @@ class ZhiPuModels(OpenAIBase):
         return ChatResponse(
             content="Unexpected error: max retries exceeded",
             success=False
-        ), 0
+        )
 
     
     async def chat_stream(self, 
@@ -163,12 +169,8 @@ class ZhiPuModels(OpenAIBase):
                                     reasoning_start = False
                                 content += chunk.choices[0].delta.content 
 
-                            # 统计tokens
-                            tokens = self._total_token_count(chunk)
-                            if not tokens:
+                            if content:
                                 total_tokens += num_tokens_from_string(content)
-                            else:
-                                total_tokens += tokens
 
                             # 如果超长截断，则添加截断提示
                             if chunk.choices[0].finish_reason == "length":
@@ -207,13 +209,13 @@ class ZhiPuModels(OpenAIBase):
                        tools: Optional[List[dict]] = None,
                        tool_choice: Literal["none", "auto", "required"] = "auto",
                        with_think: Optional[bool] = False,
-                       **kwargs) -> Tuple[AskToolResponse, int]:
+                       **kwargs) -> AskToolResponse:
         """OpenAI兼容的工具调用实现，支持失败重试"""
         if tool_choice == "required" and not tools:
             return AskToolResponse(
                 content="tool_choice 为 'required' 时必须提供 tools",
                 success=False
-            ), 0
+            )
         
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -244,7 +246,7 @@ class ZhiPuModels(OpenAIBase):
                     return AskToolResponse(
                         content="llm error: Invalid response structure",
                         success=False
-                    ), 0
+                    )
                 
                 msg = response.choices[0].message
                 tool_calls = []
@@ -262,11 +264,17 @@ class ZhiPuModels(OpenAIBase):
                             args=args
                         ))
                 
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens = self._extract_tokens(response)
                 return AskToolResponse(
                     content=msg.content or "",
                     tool_calls=tool_calls,
-                    success=True
-                ), self._total_token_count(response)
+                    success=True,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                    total_tokens=total_tokens,
+                )
 
             except Exception as e:
                 # 检查是否需要重试
@@ -275,7 +283,7 @@ class ZhiPuModels(OpenAIBase):
                     return AskToolResponse(
                         content="llm error: " + str(e),
                         success=False
-                    ), 0
+                    )
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
@@ -285,7 +293,7 @@ class ZhiPuModels(OpenAIBase):
         return AskToolResponse(
             content="llm error: Unexpected error: max retries exceeded",
             success=False
-        ), 0
+        )
 
 
     async def ask_tools_stream(self,
@@ -343,10 +351,8 @@ class ZhiPuModels(OpenAIBase):
                             if not chunk.choices:
                                 continue
                             
-                            # 统计tokens
-                            tokens = self._total_token_count(chunk)
-                            if tokens:
-                                total_tokens += tokens
+                            if content:
+                                total_tokens += num_tokens_from_string(content)
 
                             # 拼接think部分，开启"reasoning_mode": "deep"后有本内容
                             if hasattr(chunk.choices[0].delta, "reasoning_content") and chunk.choices[0].delta.reasoning_content is not None:
@@ -389,6 +395,7 @@ class ZhiPuModels(OpenAIBase):
                         # 处理收集到的工具调用，格式化为字符串
                         if tool_calls_collected:
                             tool_calls_str = self._format_tool_calls(tool_calls_collected)
+                            total_tokens += num_tokens_from_string(tool_calls_str)
                             yield tool_calls_str
                     
                     except Exception as e:

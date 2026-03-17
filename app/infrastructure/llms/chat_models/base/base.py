@@ -72,7 +72,7 @@ class LLM(ABC):
                   user_question: str,
                   history: List[Dict[str, Any]] = None,
                   with_think: Optional[bool] = False,
-                  **kwargs) -> Tuple[ChatResponse, int]:
+                  **kwargs) -> ChatResponse:
         """执行聊天对话，子类必须实现
         
         Args:
@@ -118,7 +118,7 @@ class LLM(ABC):
                        tools: Optional[List[dict]] = None,
                        tool_choice: Literal["none", "auto", "required"] = "auto",
                        with_think: Optional[bool] = False,
-                       **kwargs) -> Tuple[AskToolResponse, int]:
+                       **kwargs) -> AskToolResponse:
         """执行工具调用，子类必须实现
         
         Args:
@@ -215,25 +215,6 @@ class LLM(ABC):
         
         return content
 
-
-    def _total_token_count(self, response):
-        """从响应中提取token总数，适配多种响应格式"""
-        try:
-            # OpenAI格式：response.usage.total_tokens
-            return response.usage.total_tokens
-        except AttributeError:
-            pass
-        
-        try:
-            # Claude格式：response.usage.input_tokens + response.usage.output_tokens
-            return response.usage.input_tokens + response.usage.output_tokens
-        except AttributeError:
-            pass
-        
-        # 无法获取token数量
-        return 0
-    
-
     def _calculate_dynamic_ctx(self, history: List[Dict[str, Any]]):
         """计算动态上下文窗口大小"""
         def _count_tokens(text: str) -> int:
@@ -245,7 +226,6 @@ class LLM(ABC):
                 else:
                     total += 2  # 非ASCII字符（中文、日文、韩文等）
             return total
-
 
         total_tokens = 0
         for message in history:

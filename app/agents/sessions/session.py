@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from .message import Message
 
@@ -18,8 +18,14 @@ class Session(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     # 会话历史信息
-    messages: List[Message] = Field(default_factory=list)  # 历史会话记录
-    last_consolidated: int = 0  # 已经合并到压缩结果的消息数量
+    messages: List[Message] = Field(default_factory=list)  # 原始历史会话记录
+
+    # 长期记忆提取信息
+    last_consolidated: int = 0  # 已被“长期记忆提取”处理过的消息数量（用于记忆流水线）
+
+    # 会话压缩信息
+    compaction: Optional[Message] = None  # 最新压缩摘要消息
+    last_compacted: int = 0  # 已被“会话压缩”覆盖的 messages 数量（to_context 从此处开始取）
 
     created_at: datetime = Field(default_factory=datetime.now)
     last_updated: datetime = Field(default_factory=datetime.now)
@@ -28,13 +34,23 @@ class Session(BaseModel):
         """清空会话历史。"""
         self.messages.clear()
         self.last_consolidated = 0
+        self.compaction = None
+        self.last_compacted = 0
         self.last_updated = datetime.now()
     
     def to_context(self, max_messages: int = 500) -> List[Dict[str, Any]]:
-        """返回未合并到压缩结果的消息，按照用户回合对齐。"""
-        unconsolidated = self.messages[self.last_consolidated:]
-        sliced = unconsolidated[-max_messages:]
-        return [s.to_context() for s in sliced]
+        """返回供 LLM 使用的会话上下文。
+
+        规则：
+        - 若存在 compaction 摘要，则优先使用“最新摘要 + last_compacted 之后的消息”；
+        """
+        if self.compaction is not None and self.last_compacted > 0:
+            tail = self.messages[self.last_compacted:]
+            sliced = tail[-max_messages:]
+            summary = self.compaction.to_context()
+            return [summary] + [m.to_context() for m in sliced]
+        sliced = self.messages[-max_messages:]
+        return [m.to_context() for m in sliced]
 
     def to_information(self) -> Dict[str, Any]:
         """会话关键信息，供 API 列表等使用。"""
@@ -64,6 +80,8 @@ class Session(BaseModel):
             "metadata": self.metadata,
             "messages": [msg.model_dump() for msg in self.messages],
             "last_consolidated": self.last_consolidated,
+            "compaction": (self.compaction.model_dump() if self.compaction is not None else None),
+            "last_compacted": self.last_compacted,
             "created_at": self.created_at.isoformat(),
             "last_updated": self.last_updated.isoformat(),
         }

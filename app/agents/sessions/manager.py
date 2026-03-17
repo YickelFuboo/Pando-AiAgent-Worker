@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from .message import Message
 from .session import Session
 from .store import SessionStore, LocalFileSessionStore, DatabaseSessionStore
+from .compaction import SessionCompaction
 from app.config.settings import settings
 
 
@@ -154,6 +155,32 @@ class SessionManager:
         except Exception as e:
             logging.error("Error clearing history for session %s: %s", session_id, e)
             return False
+
+    async def compact_session(
+        self,
+        session_id: str,
+        keep_last_n: int = 0,
+    ) -> bool:
+        """对会话执行压缩：生成摘要并记录到 Session.compactions，不删除历史消息。
+
+        Args:
+            session_id: 会话 ID
+            keep_last_n: 保留最近 n 条消息不参与压缩
+
+        Returns:
+            是否成功
+        """
+        session = await self.get_session(session_id)
+        if not session:
+            logging.warning("Cannot compact: session not found: %s", session_id)
+            return False
+        ok = await SessionCompaction.process(session, keep_last_n=keep_last_n)
+        if not ok:
+            return False
+        session.last_updated = datetime.now()
+        await self._store.save(session)
+        logging.info("Compacted session %s (keep_last_n=%d)", session_id, keep_last_n)
+        return True
 
 
 SESSION_MANAGER = SessionManager()

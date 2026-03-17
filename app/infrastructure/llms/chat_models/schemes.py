@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel
 
 
@@ -6,6 +6,11 @@ class ChatResponse(BaseModel):
     """聊天响应格式"""
     success: bool = True         # 返回申请情况下成功与否
     content: str                 # 返回内容，包含成功情况下正确内容和失败情况下错误信息
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    total_tokens: int = 0
 
 
 class ToolInfo(BaseModel):
@@ -20,6 +25,11 @@ class AskToolResponse(BaseModel):
     success: bool = True         # 返回申请情况下成功与否
     content: Optional[str] = None                 # 返回内容，包含成功情况下思考内容和失败情况下错误信息
     tool_calls: Optional[List[ToolInfo]] = None  # 支持多个工具调用
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    total_tokens: int = 0
 
 
 class LLMInfo(BaseModel):

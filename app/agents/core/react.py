@@ -6,6 +6,8 @@ from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, W
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.message import Message, ToolCall, Function
+from app.agents.sessions.manager import SESSION_MANAGER
+from app.agents.sessions.compaction import SessionCompaction
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
@@ -208,7 +210,7 @@ class ReActAgent(BaseAgent):
                 self._current_step += 1
 
                 # 模型思考和工具调度
-                content, tool_calls = await self.think(llm, question)
+                content, tool_calls, tokens = await self.think(llm, question)
                 if not tool_calls:
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(original_question))
@@ -221,6 +223,13 @@ class ReActAgent(BaseAgent):
                         had_push_user_message = True
                     await self.push_history_message_and_notify_user(Message.tool_call_message(content, tool_calls))
                     await self.act(tool_calls)
+
+                # 检查上下文是否溢出，需要压缩
+                if SessionCompaction.is_overflow(tokens=tokens, llm=llm):
+                    await SESSION_MANAGER.compact_session(
+                        self.session_id,
+                        keep_last_n=4,
+                    )
 
                 # 检查模型是否进行死循环
                 if await self.is_stuck():
@@ -249,16 +258,14 @@ class ReActAgent(BaseAgent):
                     logging.warning("Memory consolidate_memory (background) failed: %s", e)
             asyncio.create_task(memory_manager.consolidate_memory()).add_done_callback(_on_consolidate_done)
 
-    async def think(self, llm: Any, question: str) -> Tuple[str, bool]:
-        """Think about the question"""
-        # 获取当前会话历史
+    async def think(self, llm: Any, question: str) -> Tuple[str, List[ToolCall], int]:
+        """Think about the question. Returns (content, tool_calls, overflow_tokens)."""
         history = await self.get_history_context()
-
         response = None
-        tool_calls = []
+        tool_calls: List[ToolCall] = []
         try:
             if self.tool_choices == ToolChoice.NONE:
-                response, token_count = await llm.chat(
+                response = await llm.chat(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
@@ -268,7 +275,7 @@ class ReActAgent(BaseAgent):
                 if not response.success:
                     raise Exception(response.content)
             else:
-                response, token_count = await llm.ask_tools(
+                response = await llm.ask_tools(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
@@ -280,21 +287,23 @@ class ReActAgent(BaseAgent):
                 
                 # 处理工具调用
                 if response.tool_calls:
-                    for i, tool_info in enumerate(response.tool_calls):
+                    for tool_info in response.tool_calls:
                         if tool_info.name:
-                            tool_call = ToolCall(
+                            tool_calls.append(ToolCall(
                                 id=tool_info.id,
                                 function=Function(
                                     name=tool_info.name,
                                     arguments=json.dumps(tool_info.args, ensure_ascii=False)
                                 )
-                            )
-                            tool_calls.append(tool_call)
+                            ))
 
                 if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
 
-            return response.content, tool_calls
+            tokens = (response.input_tokens or 0) + (response.cache_read_tokens or 0) + (response.cache_write_tokens or 0)
+            if tokens <= 0:
+                tokens = response.total_tokens or 0
+            return response.content, tool_calls, tokens
 
         except Exception as e:
             logging.error(f"Error in agent(%s) thinking process: %s", self.agent_type, e)

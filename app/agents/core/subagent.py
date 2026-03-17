@@ -293,7 +293,7 @@ When you have completed the task, provide a clear summary of your findings or ac
         tool_calls = []
         try:
             if self.tool_choices == ToolChoice.NONE:
-                response, token_count = await llm.chat(
+                response = await llm.chat(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=task,
@@ -303,7 +303,7 @@ When you have completed the task, provide a clear summary of your findings or ac
                 if not response.success:
                     raise Exception(response.content)
             else:
-                response, token_count = await llm.ask_tools(
+                response = await llm.ask_tools(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=task,

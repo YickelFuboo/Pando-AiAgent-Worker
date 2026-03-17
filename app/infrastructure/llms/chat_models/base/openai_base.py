@@ -50,6 +50,37 @@ class OpenAIBase(LLM):
         except Exception as e:
             logging.error(f"Error in _format_openai_message: {e}")
             raise e
+
+    def _extract_tokens(self, response) -> Tuple[int, int, int, int, int]:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return 0, 0, 0, 0, 0
+        
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
+        input_tokens = getattr(usage, "input_tokens", None)
+        output_tokens = getattr(usage, "output_tokens", None)
+        cache_read_tokens = getattr(usage, "cache_read_tokens", None)
+        cache_write_tokens = getattr(usage, "cache_write_tokens", None)
+        if not isinstance(cache_read_tokens, int):
+            cache_read_tokens = getattr(usage, "cached_tokens", None)
+        if not isinstance(cache_read_tokens, int):
+            cache_read_tokens = 0
+        if not isinstance(cache_write_tokens, int):
+            cache_write_tokens = 0
+        if isinstance(total_tokens, int) and total_tokens > 0:
+            in_tok = prompt_tokens if isinstance(prompt_tokens, int) else (input_tokens if isinstance(input_tokens, int) else 0)
+            out_tok = completion_tokens if isinstance(completion_tokens, int) else (output_tokens if isinstance(output_tokens, int) else 0)
+            return in_tok, out_tok, cache_read_tokens, cache_write_tokens, total_tokens
+        if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+            total = prompt_tokens + completion_tokens + cache_read_tokens + cache_write_tokens
+            return prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens, total
+        if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+            total = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens
+            return input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total
+        
+        return 0, 0, cache_read_tokens, cache_write_tokens, 0
     
     async def chat(self, 
                   system_prompt: str,
@@ -57,7 +88,7 @@ class OpenAIBase(LLM):
                   user_question: str,
                   history: List[Dict[str, Any]] = None,
                   with_think: Optional[bool] = False,
-                  **kwargs) -> Tuple[ChatResponse, int]:
+                  **kwargs) -> ChatResponse:
         """OpenAI兼容的聊天实现，支持失败重试"""
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -80,7 +111,7 @@ class OpenAIBase(LLM):
                     return ChatResponse(
                         content="Invalid response structure",
                         success=False
-                    ), 0
+                    )
                 
                 # 获取回答内容
                 # ps：非流式场景下，即便开启了reasoning_mode: "deep"，也不会返回reasoning_content字段，所有内容
@@ -90,11 +121,17 @@ class OpenAIBase(LLM):
                 # 检查是否因长度限制截断
                 if response.choices[0].finish_reason == "length":
                     content = self._add_truncate_notify(content)
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens = self._extract_tokens(response)
 
                 return ChatResponse(
                     content=content,
-                    success=True
-                ), self._total_token_count(response)
+                    success=True,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                    total_tokens=total_tokens,
+                )
             
             except Exception as e:
                 # 检查是否需要重试
@@ -103,7 +140,7 @@ class OpenAIBase(LLM):
                     return ChatResponse(
                         content="llm error: " + str(e),
                         success=False
-                    ), 0
+                    )
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
@@ -113,7 +150,7 @@ class OpenAIBase(LLM):
         return ChatResponse(
             content="llm error: Unexpected error: max retries exceeded",
             success=False
-        ), 0
+        )
 
     
     async def chat_stream(self, 
@@ -173,12 +210,8 @@ class OpenAIBase(LLM):
                                     reasoning_start = False
                                 content += chunk.choices[0].delta.content 
 
-                            # 统计tokens
-                            tokens = self._total_token_count(chunk)
-                            if not tokens:
+                            if content:
                                 total_tokens += num_tokens_from_string(content)
-                            else:
-                                total_tokens += tokens
 
                             # 如果超长截断，则添加截断提示
                             if chunk.choices[0].finish_reason == "length":
@@ -217,13 +250,13 @@ class OpenAIBase(LLM):
                        tools: Optional[List[dict]] = None,
                        tool_choice: Literal["none", "auto", "required"] = "auto",
                        with_think: Optional[bool] = False,
-                       **kwargs) -> Tuple[AskToolResponse, int]:
+                       **kwargs) -> AskToolResponse:
         """OpenAI兼容的工具调用实现，支持失败重试"""
         if tool_choice == "required" and not tools:
             return AskToolResponse(
                 content="tool_choice 为 'required' 时必须提供 tools",
                 success=False
-            ), 0
+            )
         
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
@@ -249,7 +282,7 @@ class OpenAIBase(LLM):
                     return AskToolResponse(
                         content="llm error: Invalid response structure",
                         success=False
-                    ), 0
+                    )
                 
                 msg = response.choices[0].message
                 tool_calls = []
@@ -267,11 +300,17 @@ class OpenAIBase(LLM):
                             args=args
                         ))
                 
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens = self._extract_tokens(response)
                 return AskToolResponse(
                     content=msg.content or "",
                     tool_calls=tool_calls,
-                    success=True
-                ), self._total_token_count(response)
+                    success=True,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                    total_tokens=total_tokens,
+                )
 
             except Exception as e:
                 # 检查是否需要重试
@@ -280,7 +319,7 @@ class OpenAIBase(LLM):
                     return AskToolResponse(
                         content="llm error: " + str(e),
                         success=False
-                    ), 0
+                    )
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
@@ -290,7 +329,7 @@ class OpenAIBase(LLM):
         return AskToolResponse(
             content="llm error: Unexpected error: max retries exceeded",
             success=False
-        ), 0
+        )
 
 
     async def ask_tools_stream(self,
@@ -343,10 +382,8 @@ class OpenAIBase(LLM):
                             if not chunk.choices:
                                 continue
                             
-                            # 统计tokens
-                            tokens = self._total_token_count(chunk)
-                            if tokens:
-                                total_tokens += tokens
+                            if content:
+                                total_tokens += num_tokens_from_string(content)
 
                             # 拼接think部分，开启"reasoning_mode": "deep"后有本内容
                             if hasattr(chunk.choices[0].delta, "reasoning_content") and chunk.choices[0].delta.reasoning_content is not None:
@@ -389,6 +426,7 @@ class OpenAIBase(LLM):
                         # 处理收集到的工具调用，格式化为字符串
                         if tool_calls_collected:
                             tool_calls_str = self._format_tool_calls(tool_calls_collected)
+                            total_tokens += num_tokens_from_string(tool_calls_str)
                             yield tool_calls_str
                     
                     except Exception as e:

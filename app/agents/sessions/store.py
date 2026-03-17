@@ -147,6 +147,12 @@ def _row_to_session(row) -> Session:
     meta = getattr(row, "metadata_", None)
     if meta is None or not isinstance(meta, dict):
         meta = {}
+    compaction = None
+    if isinstance(meta.get("compaction"), dict):
+        compaction = Message(**meta["compaction"])
+    elif isinstance(meta.get("compactions"), list) and meta["compactions"]:
+        compaction = Message(**meta["compactions"][-1])
+    last_compacted = int(meta.get("last_compacted") or 0)
     llm_provider = getattr(row, "llm_provider", None) or ""
     last_consolidated = getattr(row, "last_consolidated", 0) or 0
     agent_type = getattr(row, "agent_type", None) or getattr(row, "session_type", "") or ""
@@ -162,6 +168,8 @@ def _row_to_session(row) -> Session:
         messages=messages,
         metadata=meta,
         last_consolidated=last_consolidated,
+        compaction=compaction,
+        last_compacted=last_compacted,
         created_at=row.created_at,
         last_updated=row.last_updated,
     )
@@ -184,6 +192,9 @@ class DatabaseSessionStore(SessionStore):
 
     async def save(self, session: Session) -> None:
         messages_json = [msg.model_dump() for msg in session.messages]
+        meta = dict(session.metadata or {})
+        meta["compaction"] = (session.compaction.model_dump() if session.compaction is not None else None)
+        meta["last_compacted"] = session.last_compacted or 0
         async for db in get_db():
             try:
                 r = (
@@ -199,7 +210,7 @@ class DatabaseSessionStore(SessionStore):
                     rec.user_id = session.user_id
                     rec.llm_provider = session.llm_provider or ""
                     rec.llm_model = session.llm_model
-                    rec.metadata_ = session.metadata
+                    rec.metadata_ = meta
                     rec.messages = messages_json
                     rec.last_consolidated = session.last_consolidated
                     rec.last_updated = session.last_updated
@@ -212,7 +223,7 @@ class DatabaseSessionStore(SessionStore):
                         user_id=session.user_id,
                         llm_provider=session.llm_provider or "",
                         llm_model=session.llm_model,
-                        metadata_=session.metadata,
+                        metadata_=meta,
                         messages=messages_json,
                         last_consolidated=session.last_consolidated,
                         created_at=session.created_at,

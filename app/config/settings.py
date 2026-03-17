@@ -141,6 +141,13 @@ class Settings(BaseSettings):
     agent_session_use_local_storage: bool = Field(default=False, description="为 True 时会话存本地文件，为 False 时存数据库", env="AGENT_SESSION_USE_LOCAL_STORAGE")
     agent_session_storage_dir: str = Field(default="data/sessions", description="本地会话文件目录(仅本地存储时生效)", env="AGENT_SESSION_STORAGE_DIR")
 
+    # =============================================================================
+    # 会话压缩 - Session Compaction
+    # =============================================================================
+    compaction_auto: bool = Field(default=True, description="上下文溢出时是否自动压缩会话", env="COMPACTION_AUTO")
+    compaction_reserved: Optional[int] = Field(default=None, description="为压缩预留的 token 缓冲，默认 20000 与 max_output_tokens 取小", env="COMPACTION_RESERVED")
+    compaction_context_limit: int = Field(default=128_000, description="模型上下文上限(token)，用于溢出判断", env="COMPACTION_CONTEXT_LIMIT")
+
     class Config:
         env_file = os.path.join(PROJECT_BASE_DIR, "env")
         env_file_encoding = "utf-8"
