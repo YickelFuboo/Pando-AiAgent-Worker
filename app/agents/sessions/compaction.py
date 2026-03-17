@@ -62,23 +62,34 @@ When constructing the summary, try to stick to this template:
         
         llm_context_limit = None
         llm_max_output_tokens = None
+        llm_max_input_tokens = None
         if llm is not None:
             limits = getattr(llm, "limits", None)
             llm_context_limit = getattr(limits, "context_limit", None)
             llm_max_output_tokens = getattr(limits, "max_output_tokens", None)
+            llm_max_input_tokens = getattr(limits, "max_input_tokens", None)
 
         limit = llm_context_limit or getattr(settings, "compaction_context_limit", 128_000)
-        if limit <= 0:
-            return False
-        
-        max_out = llm_max_output_tokens or 8192
         res = getattr(settings, "compaction_reserved", None)
         if res is None:
+            max_out = llm_max_output_tokens or 8192
             res = min(SessionCompaction.COMPACTION_BUFFER, max_out)
-        usable = limit - max_out - res  # 可用空间 = 上下文上限 - 下轮最大输出 token 数 - 为压缩预留的 token 缓冲
-        if usable <= 0:
+
+        basis = usage.overflow_basis()
+
+        if llm_max_input_tokens is not None and llm_max_input_tokens > 0:
+            usable_in = llm_max_input_tokens - res
+            if usable_in > 0 and basis >= usable_in:
+                return True
+
+        if limit <= 0:
             return False
-        return usage.overflow_basis() >= usable  # 当前模型交互 token 数是否超过可用空间
+
+        max_out = llm_max_output_tokens or 8192
+        usable_ctx = limit - max_out - res  # 可用空间 = 上下文上限 - 下轮最大输出 token 数 - 为压缩预留的 token 缓冲
+        if usable_ctx <= 0:
+            return False
+        return basis >= usable_ctx  # 当前输入 token 是否超过可用空间
 
 
     @staticmethod
