@@ -1,54 +1,120 @@
 import json
+import re
 from typing import Any,Dict,List,Optional
 import json_repair
 from pydantic import BaseModel,field_validator
 
 
-def parse_tool_args(v: Any) -> Dict[str, Any]:
-    if isinstance(v, dict):
-        return v
-    if v is None:
+class ToolArgsParser:
+    @staticmethod
+    def parse(v: Any) -> Dict[str, Any]:
+        if isinstance(v, dict):
+            return v
+        if v is None:
+            return {}
+        if not isinstance(v, str):
+            return {}
+        s=v.strip()
+        if not s:
+            return {}
+        
+        s=ToolArgsParser._strip_code_fence(s) # 去除代码块
+        s=ToolArgsParser._strip_outer_quotes(s) # 去除外层引号
+        out=ToolArgsParser._try_json_then_double(s) # 尝试解析为JSON
+        if out is not None:
+            return out
+        
+        out=ToolArgsParser._try_repair_then_double(s) # 尝试修复并解析为JSON    
+        if out is not None:
+            return out
+        
+        for snippet in ToolArgsParser._iter_json_object_snippets(s): # 迭代JSON对象片段
+            out=ToolArgsParser._try_json_then_double(snippet) # 尝试解析为JSON
+            if out is not None:
+                return out
+            out=ToolArgsParser._try_repair_then_double(snippet) # 尝试修复并解析为JSON
+            if out is not None:
+                return out
+        out=ToolArgsParser._try_repair_greedy_object(s) # 尝试修复贪婪对象  
+        if out is not None:
+            return out
+        out=ToolArgsParser._extract_path_content(s)
+        if out is not None:
+            return out
         return {}
-    if not isinstance(v, str):
-        return {}
-    s = v.strip()
-    if not s:
-        return {}
-    if s.startswith("```"):
-        lines=[ln for ln in s.splitlines() if not ln.strip().startswith("```")]
-        s="\n".join(lines).strip()
-    if len(s)>=2 and s[0]==s[-1] and s[0] in ("'",'"'):
-        s=s[1:-1].strip()
 
-    
-    try:
-        o=json.loads(s)
+    @staticmethod
+    def _strip_code_fence(s: str) -> str:
+        # 去除代码块
+        if not s.startswith("```"):
+            return s
+        lines=[ln for ln in s.splitlines() if not ln.strip().startswith("```")]
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _strip_outer_quotes(s: str) -> str:
+        # 去除外层引号
+        if len(s)<2:
+            return s
+        if s[0]==s[-1] and s[0] in ("'",'"'):
+            return s[1:-1].strip()
+        return s
+
+    @staticmethod
+    def _try_json_then_double(s: str) -> Optional[Dict[str, Any]]:
+        # 尝试解析为JSON
+        try:
+            o=json.loads(s)
+        except json.JSONDecodeError:
+            return None
         if isinstance(o, dict):
             return o
         if isinstance(o, str):
             try:
                 o2=json.loads(o)
-                if isinstance(o2, dict):
-                    return o2
             except json.JSONDecodeError:
-                pass
-    except json.JSONDecodeError:
-        pass
-    try:
-        o=json_repair.loads(s)
+                return None
+            return o2 if isinstance(o2, dict) else None
+        return None
+
+    @staticmethod
+    def _try_repair_then_double(s: str) -> Optional[Dict[str, Any]]:
+        # 尝试修复并解析为JSON
+        try:
+            o=json_repair.loads(s)
+        except Exception:
+            return None
         if isinstance(o, dict):
             return o
         if isinstance(o, str):
             try:
                 o2=json_repair.loads(o)
-                if isinstance(o2, dict):
-                    return o2
             except Exception:
-                pass
-    except Exception:
-        pass
+                return None
+            return o2 if isinstance(o2, dict) else None
+        return None
 
+    @staticmethod
     def _iter_json_object_snippets(text: str):
+        # 目标:从一段“混杂文本”中提取所有“完整闭合”的JSON对象片段,逐个yield出形如"{...}"的子串
+        #
+        # 为什么需要它:
+        # - 模型返回的arguments经常不是纯JSON,可能前后夹杂日志/解释文字/markdown代码块
+        # - 直接用find("{")+rfind("}")会贪婪吞掉多个对象/无关内容,导致解析失败或误解析
+        #
+        # 核心思想:
+        # - 从左到右扫描,遇到'{'认为可能是对象起点
+        # - 用depth统计大括号嵌套层级:'{'=>+1,'}'=>-1
+        # - 当depth从1回到0时,说明从start到当前位置j形成了一个“括号配平”的对象片段,即可yield
+        #
+        # 关键细节(避免把字符串内容里的括号当结构括号):
+        # - in_str:是否处于JSON字符串字面量内部(双引号包裹)
+        # - esc:处理反斜杠转义,避免把\"误当作字符串结束
+        # - 只有在in_str==False时,才对'{'/'}'做depth计数
+        #
+        # 注意:
+        # - 该方法不验证片段一定是合法JSON(比如字段里引号坏了也可能配平),只负责“结构上闭合”
+        # - 外层会对yield出的片段再用json.loads/json_repair.loads尝试解析成dict
         i=0
         n=len(text)
         while i<n:
@@ -83,20 +149,42 @@ def parse_tool_args(v: Any) -> Dict[str, Any]:
                 j+=1
             else:
                 break
-    for snippet in _iter_json_object_snippets(s):
-        try:
-            o=json.loads(snippet)
-            if isinstance(o, dict):
-                return o
-        except json.JSONDecodeError:
-            pass
+
+    @staticmethod
+    def _try_repair_greedy_object(s: str) -> Optional[Dict[str, Any]]:
+        # 尝试修复贪婪对象
+        start=s.find("{")
+        end=s.rfind("}")
+        if start==-1 or end==-1 or end<=start:
+            return None
+        snippet=s[start:end+1]
         try:
             o=json_repair.loads(snippet)
-            if isinstance(o, dict):
-                return o
         except Exception:
-            pass
-    return {}
+            return None
+        return o if isinstance(o, dict) else None
+
+    @staticmethod
+    def _extract_path_content(s: str) -> Optional[Dict[str, Any]]:
+        # 提取路径和内容
+        m_path=re.search(r'"path"\s*:\s*"((?:\\.|[^"\\])*)"',s)
+        m_content=re.search(r'"content"\s*:\s*"((?:\\.|[^"\\])*)"',s,re.DOTALL)
+        if not (m_path or m_content):
+            return None
+        out={}
+        if m_path:
+            out["path"]=ToolArgsParser._unescape_json_string(m_path.group(1))
+        if m_content:
+            out["content"]=ToolArgsParser._unescape_json_string(m_content.group(1))
+        return out
+
+    @staticmethod
+    def _unescape_json_string(raw: str) -> str:
+        # 反义JSON字符串
+        try:
+            return json.loads('"'+raw+'"')
+        except Exception:
+            return raw
 
 
 class TokenUsage(BaseModel):
@@ -150,7 +238,7 @@ class ToolInfo(BaseModel):
     @field_validator("args", mode="before")
     @classmethod
     def _args_must_be_dict(cls, v: Any) -> Dict[str, Any]:
-        return parse_tool_args(v)
+        return ToolArgsParser.parse(v)
 
 
 class AskToolResponse(BaseModel):
