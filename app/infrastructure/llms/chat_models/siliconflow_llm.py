@@ -1,6 +1,6 @@
 from openai import AsyncOpenAI
 from app.infrastructure.llms.chat_models.base.openai_base import OpenAIBase
-from app.infrastructure.llms.chat_models.base.base import CONNECTION_TIMEOUT, MAX_RETRY_ATTEMPTS
+from app.infrastructure.llms.chat_models.base.base import build_llm_httpx_timeout
 
 class SiliconFlowModels(OpenAIBase):
     """SiliconFlow模型系列"""
@@ -22,6 +22,6 @@ class SiliconFlowModels(OpenAIBase):
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=CONNECTION_TIMEOUT, 
-            max_retries=MAX_RETRY_ATTEMPTS  
+            timeout=build_llm_httpx_timeout(**kwargs),
+            max_retries=0,
         )

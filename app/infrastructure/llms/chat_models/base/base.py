@@ -9,6 +9,7 @@ from copy import deepcopy
 from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Protocol,Tuple,Union
 from urllib.parse import urljoin
 import json_repair
+import httpx
 import openai
 import requests
 from openai import OpenAI
@@ -21,7 +22,28 @@ from app.infrastructure.llms.chat_models.schemes import AskToolResponse,ChatResp
 # 重试配置常量
 MAX_RETRY_ATTEMPTS = 3  # 最大尝试次数
 RETRY_DELAY = 2  # 重试间隔（秒）
-CONNECTION_TIMEOUT = 30  # 连接超时（秒）
+CONNECTION_TIMEOUT = 30  # 默认连接超时（秒）
+DEFAULT_READ_TIMEOUT = 300.0  # 默认读超时（秒），LLM 首包与流式间隔
+DEFAULT_WRITE_TIMEOUT = 120.0  # 默认写超时（秒）
+DEFAULT_POOL_TIMEOUT = 30.0  # 默认连接池超时（秒）
+
+
+def build_llm_httpx_timeout(**kwargs: Any) -> httpx.Timeout:
+    """从模型配置构造 httpx 分阶段超时，供 openai.AsyncOpenAI 等接受 httpx.Timeout 的客户端使用（DeepSeek/Qwen/SiliconFlow 等走同一 SDK 即复用，与是否 OpenAI 厂商无关）。"""
+    def _to_float(key: str, default: float) -> float:
+        v = kwargs.get(key)
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+    return httpx.Timeout(
+        connect=_to_float("timeout_connect", float(CONNECTION_TIMEOUT)),
+        read=_to_float("timeout_read", DEFAULT_READ_TIMEOUT),
+        write=_to_float("timeout_write", DEFAULT_WRITE_TIMEOUT),
+        pool=_to_float("timeout_pool", DEFAULT_POOL_TIMEOUT),
+    )
 
 
 class LLM(ABC):
