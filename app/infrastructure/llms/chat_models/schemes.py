@@ -1,5 +1,102 @@
+import json
 from typing import Any,Dict,List,Optional
-from pydantic import BaseModel
+import json_repair
+from pydantic import BaseModel,field_validator
+
+
+def parse_tool_args(v: Any) -> Dict[str, Any]:
+    if isinstance(v, dict):
+        return v
+    if v is None:
+        return {}
+    if not isinstance(v, str):
+        return {}
+    s = v.strip()
+    if not s:
+        return {}
+    if s.startswith("```"):
+        lines=[ln for ln in s.splitlines() if not ln.strip().startswith("```")]
+        s="\n".join(lines).strip()
+    if len(s)>=2 and s[0]==s[-1] and s[0] in ("'",'"'):
+        s=s[1:-1].strip()
+
+    
+    try:
+        o=json.loads(s)
+        if isinstance(o, dict):
+            return o
+        if isinstance(o, str):
+            try:
+                o2=json.loads(o)
+                if isinstance(o2, dict):
+                    return o2
+            except json.JSONDecodeError:
+                pass
+    except json.JSONDecodeError:
+        pass
+    try:
+        o=json_repair.loads(s)
+        if isinstance(o, dict):
+            return o
+        if isinstance(o, str):
+            try:
+                o2=json_repair.loads(o)
+                if isinstance(o2, dict):
+                    return o2
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    def _iter_json_object_snippets(text: str):
+        i=0
+        n=len(text)
+        while i<n:
+            if text[i]!="{":
+                i+=1
+                continue
+            start=i
+            depth=0
+            in_str=False
+            esc=False
+            j=i
+            while j<n:
+                ch=text[j]
+                if in_str:
+                    if esc:
+                        esc=False
+                    elif ch=="\\":
+                        esc=True
+                    elif ch=='"':
+                        in_str=False
+                else:
+                    if ch=='"':
+                        in_str=True
+                    elif ch=="{":
+                        depth+=1
+                    elif ch=="}":
+                        depth-=1
+                        if depth==0:
+                            yield text[start:j+1]
+                            i=j+1
+                            break
+                j+=1
+            else:
+                break
+    for snippet in _iter_json_object_snippets(s):
+        try:
+            o=json.loads(snippet)
+            if isinstance(o, dict):
+                return o
+        except json.JSONDecodeError:
+            pass
+        try:
+            o=json_repair.loads(snippet)
+            if isinstance(o, dict):
+                return o
+        except Exception:
+            pass
+    return {}
 
 
 class TokenUsage(BaseModel):
@@ -49,6 +146,11 @@ class ToolInfo(BaseModel):
     id: str
     name: str
     args: Dict[str, Any]
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def _args_must_be_dict(cls, v: Any) -> Dict[str, Any]:
+        return parse_tool_args(v)
 
 
 class AskToolResponse(BaseModel):

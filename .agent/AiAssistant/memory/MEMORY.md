@@ -97,7 +97,7 @@ project_root/
 ### Session Management
 - Session-based conversation handling
 - Message history persistence
- Parent-child session relationships
+- Parent-child session relationships
 
 ## Windows Command Limitations & Workarounds
 

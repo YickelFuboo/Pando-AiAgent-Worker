@@ -334,7 +334,7 @@ When you have completed the task, provide a clear summary of your findings or ac
                                 id=tool_info.id,
                                 function=Function(
                                     name=tool_info.name,
-                                    arguments=json.dumps(tool_info.args, ensure_ascii=False)
+                                    arguments=tool_info.args
                                 )
                             )
                             tool_calls.append(tool_call)
@@ -370,12 +370,9 @@ When you have completed the task, provide a clear summary of your findings or ac
             raise ValueError(f"Unknown tool '{name}'")
             
         try:
-            args = json.loads(toolcall.function.arguments or "{}")
+            args = toolcall.function.arguments
             tool_result = await self.available_tools.execute(tool_name=name, tool_params=args)
             return (f"{tool_result.result}", getattr(tool_result, "metadata", None))
-        except json.JSONDecodeError:
-            logging.error(f"Invalid JSON arguments for tool '{name}'")
-            raise ValueError(f"Invalid JSON arguments for tool '{name}'")
         except Exception as e:
             logging.error(f"Tool({name}) execution error: {str(e)}")
             raise RuntimeError(f"Tool({name}) execution error: {str(e)}") 

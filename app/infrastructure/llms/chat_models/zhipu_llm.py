@@ -1,6 +1,5 @@
 from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Tuple,Union
 import asyncio
-import json
 import time
 import logging
 from zai import ZhipuAiClient
@@ -237,16 +236,10 @@ class ZhiPuModels(OpenAIBase):
                 tool_calls = []
                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                     for tool_call in msg.tool_calls:
-                        arguments = tool_call.function.arguments
-                        try:
-                            args = json.loads(arguments)
-                        except json.JSONDecodeError:
-                            args = arguments
-                        
                         tool_calls.append(ToolInfo(
-                            id=tool_call.id,
-                            name=tool_call.function.name,
-                            args=args
+                            id=tool_call.id or "",
+                            name=tool_call.function.name or "",
+                            args=tool_call.function.arguments or "",
                         ))
                 
                 usage=self._extract_usage(response)

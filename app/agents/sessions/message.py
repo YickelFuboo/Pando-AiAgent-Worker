@@ -1,8 +1,8 @@
 import json
 import re
 from enum import Enum
-from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
@@ -15,24 +15,10 @@ class Role(str, Enum):
 
 class Function(BaseModel):
     name: str
-    arguments: str
+    arguments: Dict[str,Any]
 
     def model_dump(self) -> Dict[str, Any]:
-        """自定义序列化方法"""
-        arguments = self.arguments
-        if isinstance(arguments, (dict, list)):
-            arguments = json.dumps(arguments)
-        elif isinstance(arguments, str):
-            # 如果已经是字符串，尝试解析并重新序列化以确保格式正确
-            try:
-                arguments = json.dumps(json.loads(arguments), ensure_ascii=False)
-            except json.JSONDecodeError:
-                # 如果不是有效的 JSON 字符串，直接序列化
-                arguments = json.dumps(arguments, ensure_ascii=False)
-        return {
-            "name": self.name,
-            "arguments": arguments
-        }
+        return {"name": self.name,"arguments": self.arguments}
 
 class ToolCall(BaseModel):
     """助手发起的单次工具调用（assistant 消息中）。"""
@@ -114,12 +100,8 @@ class Message(BaseModel):
     @classmethod
     def tool_call_message(cls, content: Union[str, List[str]] = "", tool_calls: Optional[List[ToolCall]] = None, **kwargs) -> "Message":
         """创建带工具调用的助手消息。"""
-        formatted_calls = [
-            {"id": call.id, "type": call.type, "function": call.function.model_dump()}
-            for call in (tool_calls or [])
-        ]
         return cls(
-            role="assistant", content=content, tool_calls=formatted_calls, create_time=datetime.now(), **kwargs
+            role="assistant", content=content, tool_calls=tool_calls, create_time=datetime.now(), **kwargs
         )
 
     @classmethod
@@ -166,7 +148,11 @@ class Message(BaseModel):
         if self.content is not None:
             message["content"] = self.content
         if self.tool_calls is not None:
-            message["tool_calls"] = [tc.model_dump() for tc in self.tool_calls]
+            formatted=[]
+            for tc in self.tool_calls:
+                arguments=json.dumps(tc.function.arguments,ensure_ascii=False)
+                formatted.append({"id": tc.id,"type": tc.type,"function": {"name": tc.function.name,"arguments": arguments}})
+            message["tool_calls"]=formatted
         if self.name is not None and self.tool_call_id is not None:
             message["name"] = self.name
             message["tool_call_id"] = self.tool_call_id
@@ -193,16 +179,15 @@ class Message(BaseModel):
             lines.append("")
         for tool_call in self.tool_calls or []:
             lines.append(tool_call.function.name + " ：")
-            args_raw = (tool_call.function.arguments or "").strip()
+            args_obj=tool_call.function.arguments
             try:
-                args_obj = json.loads(args_raw) if args_raw else {}
-                args_pretty = json.dumps(args_obj, ensure_ascii=False, indent=2)
+                args_pretty=json.dumps(args_obj or {},ensure_ascii=False,indent=2)
                 lines.append("```json")
                 lines.append(args_pretty)
                 lines.append("```")
-            except (json.JSONDecodeError, TypeError):
+            except (TypeError, ValueError):
                 lines.append("```")
-                lines.append(args_raw or "No arguments")
+                lines.append(str(args_obj) if args_obj is not None else "No arguments")
                 lines.append("```")
             lines.append("")
         return "\n".join(lines).strip()
