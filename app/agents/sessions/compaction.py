@@ -68,10 +68,7 @@ When constructing the summary, try to stick to this template:
             llm_max_input_tokens = getattr(limits, "max_input_tokens", None)
 
         limit = llm_context_limit or getattr(settings, "compaction_context_limit", 128_000)
-        res = getattr(settings, "compaction_reserved", None)
-        if res is None:
-            max_out = llm_max_output_tokens or 8192
-            res = min(SessionCompaction.COMPACTION_BUFFER, max_out)
+        res = int(getattr(settings, "compaction_reserved", 20_000) or 20_000)
 
         basis = usage.overflow_basis()
 

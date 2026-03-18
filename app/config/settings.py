@@ -145,7 +145,7 @@ class Settings(BaseSettings):
     # 会话压缩 - Session Compaction
     # =============================================================================
     compaction_auto: bool = Field(default=True, description="上下文溢出时是否自动压缩会话", env="COMPACTION_AUTO")
-    compaction_reserved: Optional[int] = Field(default=None, description="为压缩预留的 token 缓冲，默认 20000 与 max_output_tokens 取小", env="COMPACTION_RESERVED")
+    compaction_reserved: int = Field(default=20_000, description="为压缩预留的 token 缓冲", env="COMPACTION_RESERVED")
     compaction_context_limit: int = Field(default=128_000, description="模型上下文上限(token)，用于溢出判断", env="COMPACTION_CONTEXT_LIMIT")
     compaction_prune: bool = Field(default=True, description="是否启用旧工具输出修剪(prune)", env="COMPACTION_PRUNE")
     compaction_prune_protect: int = Field(default=40_000, description="保护最近工具输出token窗口(prune)", env="COMPACTION_PRUNE_PROTECT")
