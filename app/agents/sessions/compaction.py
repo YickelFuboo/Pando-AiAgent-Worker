@@ -5,10 +5,8 @@ from typing import List,Optional
 from app.agents.sessions.message import Message,Role
 from app.agents.sessions.session import Session
 from app.config.settings import settings
-from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.infrastructure.llms.chat_models.schemes import TokenUsage
 from app.infrastructure.llms.utils import num_tokens_from_string
-from app.agents.sessions.manager import SESSION_MANAGER
 
 
 class SessionCompaction:
@@ -91,45 +89,8 @@ When constructing the summary, try to stick to this template:
             return False
         return basis >= usable_ctx  # 当前输入 token 是否超过可用空间
 
-
     @staticmethod
-    async def compact(
-        session: Session,
-        keep_last_n: int = 0,
-    ) -> bool:
-        """对会话执行压缩（对外唯一入口）。
-
-        行为：
-        - 从 session.messages 中选取要压缩的历史（保留最近 keep_last_n 条不参与压缩）；
-        - 使用 session.llm_provider/session.llm_model 创建 LLM 实例；
-        - 调用模型生成摘要（assistant 消息）；
-        - 调用 apply_compaction_to_session 写回 session.compaction 与 session.last_compacted。
-
-        Returns:
-            是否成功生成并写回摘要
-        """
-        msgs = session.messages
-        if not msgs:
-            return True
-        compact_until = max(0, len(msgs) - max(0, keep_last_n))
-        to_summarize = msgs[:compact_until]
-        if not to_summarize:
-            return True
-        
-        llm = llm_factory.create_model(provider=session.llm_provider, model=session.llm_model)
-        try:
-            summary_message = await SessionCompaction.compact_messages(llm=llm,messages=to_summarize)
-            if summary_message is None or not (summary_message.content or "").strip():
-                logging.warning("Compaction produced empty or failed summary for session %s", session.session_id)
-                return False
-            SessionCompaction.apply_compaction_to_session(session, summary_message, keep_last_n=keep_last_n)
-            return True
-        except Exception as e:
-            logging.error("Compaction failed for session %s: %s", session.session_id, e)
-            return False
-
-    @staticmethod
-    async def compact_messages(*, llm:object, messages:List[Message])->Optional[Message]:
+    async def compact(*, llm:object, messages:List[Message])->Optional[Message]:
         """生成会话摘要：使用 LLM 生成会话摘要。"""
         if not messages:
             return None
@@ -146,34 +107,16 @@ When constructing the summary, try to stick to this template:
             return None
         return Message(role=Role.ASSISTANT,content=response.content.strip())
 
-    @staticmethod
-    def apply_compaction_to_session(
-        session: Session,
-        summary_message: Message,
-        keep_last_n: int = 0,
-    ) -> None:
-        """将摘要应用到会话：保留全部历史，将摘要记录到 session.compaction，并更新 last_compacted。
-
-        Args:
-            session: 会话对象，会被原地修改（不会删除旧历史）
-            summary_msg: 压缩生成的摘要消息
-            keep_last_n: 保留最近 n 条消息不参与压缩（last_compacted 指向这些消息之前）
-        """
-        msgs = session.messages
-        if not msgs:
-            session.compaction = summary_message
-            session.last_compacted = 0
-            return
-        compact_until = max(0, len(msgs) - max(0, keep_last_n))
-        session.compaction = summary_message
-        session.last_compacted = compact_until
 
     @staticmethod
-    async def prune(session: Session) -> int:
-        """修剪会话历史：移除旧工具输出，保护最近工具输出窗口。
-            此处仅为Message打上pruned_at时间戳，后续构造context时根据该时间戳修剪旧工具提供给模型的内容。
-        """
+    def prune(messages: List[Message], start: int = 0) -> int:
         if not getattr(settings, "compaction_prune", True):
+            return 0
+        if not messages:
+            return 0            
+        if start < 0:
+            start = 0
+        if start >= len(messages):
             return 0
 
         protect = int(getattr(settings, "compaction_prune_protect", 40_000) or 40_000)
@@ -185,8 +128,7 @@ When constructing the summary, try to stick to this template:
         candidates_tokens = 0
         seen_tokens = 0
 
-        start = session.last_compacted if (session.compaction is not None and session.last_compacted > 0) else 0
-        scan = session.messages[start:]
+        scan = messages[start:]
         for msg in reversed(scan):
             if not msg.is_tool_result:
                 continue
@@ -210,4 +152,3 @@ When constructing the summary, try to stick to this template:
             meta["pruned_at"] = now_ms
             msg.metadata = meta
         return candidates_tokens
-

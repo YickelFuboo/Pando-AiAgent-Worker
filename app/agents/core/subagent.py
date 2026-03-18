@@ -7,9 +7,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.agents.bus.queues import MESSAGE_BUS
 from app.agents.bus.types import InboundMessage
 from app.agents.core.base import AgentState, ToolChoice
+from app.agents.sessions.compaction import SessionCompaction
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.message import Message, Role, ToolCall, Function
+from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
+from app.infrastructure.llms.chat_models.schemes import TokenUsage
 from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool
 from app.agents.tools.local.dir_operator import ListDirTool
 from app.agents.tools.local.shell import ExecTool
@@ -134,6 +137,8 @@ class SubAgent(ABC):
         self.tool_choices = ToolChoice.AUTO
         self._register_tools()
         self.history_messages: List[Message] = []
+        self.compaction: Optional[Message] = None
+        self.last_compacted: int = 0
 
     def reset(self):
         """重置 agent 状态到初始状态
@@ -146,6 +151,8 @@ class SubAgent(ABC):
             self._state = AgentState.IDLE
             self._current_step = 0
             self.history_messages = []
+            self.compaction = None
+            self.last_compacted = 0
         except Exception as e:
             logging.error(f"Error in agent reset: {str(e)}")
             raise e
@@ -247,23 +254,30 @@ When you have completed the task, provide a clear summary of your findings or ac
 
             content = ""
             is_add_user_message = False
+            context_overflow_recovered = False
             while (self._current_step < self._max_steps and self._state != AgentState.FINISHED):
                 self._current_step += 1
 
                 # 模型思考和工具调度
-                content, tool_calls = await self.think(llm, task)
-                if not tool_calls:
-                    if not is_add_user_message:
-                        self.history_messages.append(Message.user_message(original_task))
-                        is_add_user_message = True
-                    self.history_messages.append(Message.assistant_message(content))
-                    break
-                else:
+                content, tool_calls, usage = await self.think(llm, task)
+                if tool_calls:
                     if not is_add_user_message:
                         self.history_messages.append(Message.user_message(original_task))
                         is_add_user_message = True
                     self.history_messages.append(Message.tool_call_message(content, tool_calls))
                     await self.act(tool_calls)
+                else:
+                    if not is_add_user_message:
+                        self.history_messages.append(Message.user_message(original_task))
+                        is_add_user_message = True
+                    if self._is_context_overflow_content(content) and not context_overflow_recovered:
+                        await self._handle_context_overflow(usage, llm, force=True)
+                        context_overflow_recovered = True
+                        continue
+                    self.history_messages.append(Message.assistant_message(content))
+                    break
+
+                await self._handle_context_overflow(usage, llm)
 
                 # 检查模型是否进行死循环
                 if await self.is_stuck():
@@ -284,10 +298,9 @@ When you have completed the task, provide a clear summary of your findings or ac
         finally:
             self.reset()
 
-    async def think(self, llm: Any, task: str) -> Tuple[str, bool]:
+    async def think(self, llm: Any, task: str) -> Tuple[str, List[ToolCall], TokenUsage]:
         """Think about the question"""
-        # 获取当前会话历史
-        history = [message.to_context() for message in self.history_messages]
+        history = self._build_session_for_context()
 
         response = None
         tool_calls = []
@@ -329,7 +342,7 @@ When you have completed the task, provide a clear summary of your findings or ac
                 if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
 
-            return response.content, tool_calls
+            return response.content, tool_calls, usage
 
         except Exception as e:
             logging.error(f"Error in subagent think process: %s", e)
@@ -399,3 +412,45 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         )
         await MESSAGE_BUS.push_inbound(inbound_msg)
         logging.debug("Subagent [{}] announced result to {}:{}", task_id, self.channel_type, self.channel_id)
+
+    def _is_context_overflow_content(self, content: str) -> bool:
+        if not content:
+            return False
+        return "context_overflow" in content.lower()
+
+    def _build_session_for_context(self) -> List[Dict[str, Any]]:
+        context = Session(
+            session_id=self.session_id,
+            agent_type="SubAgent",
+            user_id=self.user_id,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            messages=self.history_messages,
+            compaction=self.compaction,
+            last_compacted=self.last_compacted,
+        ).to_context()
+        return context
+
+    async def _handle_context_overflow(self, usage: TokenUsage, llm: Any, force: bool = False) -> None:
+        if SessionCompaction.is_overflow(usage=usage, llm=llm) or force:
+            await self._compact_history(llm, keep_last_n=4)
+        await self._prune_history()
+
+    async def _compact_history(self, llm: Any, keep_last_n: int = 0) -> bool:
+        if not self.history_messages:
+            return True
+        compact_until = max(0, len(self.history_messages) - max(0, keep_last_n))
+        to_summarize = self.history_messages[:compact_until]
+        if not to_summarize:
+            return True
+        summary_message = await SessionCompaction.compact(llm=llm, messages=to_summarize)
+        if summary_message is None or not (summary_message.content or "").strip():
+            return False
+        self.compaction = summary_message
+        self.last_compacted = compact_until
+        return True
+
+    async def _prune_history(self) -> int:
+        start = self.last_compacted if (self.compaction is not None and self.last_compacted > 0) else 0
+        scan = self.history_messages[start:]
+        return SessionCompaction.prune(scan)

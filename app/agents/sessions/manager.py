@@ -3,11 +3,12 @@ import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from app.infrastructure.llms.chat_models.factory import llm_factory
+from app.config.settings import settings
 from .message import Message
 from .session import Session
 from .store import SessionStore, LocalFileSessionStore, DatabaseSessionStore
 from .compaction import SessionCompaction
-from app.config.settings import settings
 
 
 class SessionManager:
@@ -174,8 +175,25 @@ class SessionManager:
         if not session:
             logging.warning("Cannot compact: session not found: %s", session_id)
             return False
-        ok = await SessionCompaction.compact(session, keep_last_n=keep_last_n)
-        if not ok:
+
+        msgs = session.messages or []
+        if not msgs:
+            return True
+        compact_until = max(0, len(msgs) - max(0, keep_last_n))
+        to_summarize = msgs[:compact_until]
+        if not to_summarize:
+            return True
+
+        llm = llm_factory.create_model(provider=session.llm_provider, model=session.llm_model)
+        try:
+            summary_message = await SessionCompaction.compact(llm=llm, messages=to_summarize)
+            if summary_message is None or not (summary_message.content or "").strip():
+                logging.warning("Compaction produced empty or failed summary for session %s", session.session_id)
+                return False
+            session.compaction = summary_message
+            session.last_compacted = compact_until
+        except Exception as e:
+            logging.error("Compaction failed for session %s: %s", session.session_id, e)
             return False
         session.last_updated = datetime.now()
         await self._store.save(session)
@@ -188,7 +206,9 @@ class SessionManager:
         if not session:
             logging.warning("Cannot prune: session not found: %s", session_id)
             return 0
-        pruned_tokens = SessionCompaction.prune(session)
+
+        start = session.last_compacted if (session.compaction is not None and session.last_compacted > 0) else 0
+        pruned_tokens = SessionCompaction.prune(session.messages, start=start)
         if pruned_tokens <= 0:
             return 0
         session.last_updated = datetime.now()
