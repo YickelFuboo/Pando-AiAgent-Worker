@@ -81,14 +81,14 @@ class ZhiPuModels(OpenAIBase):
                 # 检查是否需要重试
                 if not self._is_retryable_error(e) or attempt == MAX_RETRY_ATTEMPTS - 1:
                     logging.error(f"Error in chat (attempt {attempt + 1}): {e}")
-                    return ChatResponse(content=str(e),success=False),TokenUsage()
+                    return ChatResponse(content="llm error: " + str(e),success=False),TokenUsage()
                 
                 # 重试延迟（指数退避）
                 delay = self._get_delay(attempt)
                 logging.warning(f"Retryable error in chat (attempt {attempt + 1}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {delay:.2f}s...")
                 await asyncio.sleep(delay)
         
-        return ChatResponse(content="Unexpected error: max retries exceeded",success=False),TokenUsage()
+        return ChatResponse(content="llm error: Unexpected error: max retries exceeded",success=False),TokenUsage()
 
     
     async def chat_stream(self, 
@@ -274,7 +274,7 @@ class ZhiPuModels(OpenAIBase):
         """OpenAI兼容的工具调用流式实现，支持失败重试"""
         if tool_choice == "required" and not tools:
             return self._create_error_stream("llm error: tool_choice 为 'required' 时必须提供 tools"), TokenUsage()
-
+        
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
         )
@@ -308,7 +308,7 @@ class ZhiPuModels(OpenAIBase):
                 async def stream_response():
                     nonlocal usage
                     reasoning_start = False
-                    tool_calls_collected = {}  
+                    tool_calls_collected = {}
                     
                     try:
                         async for chunk in response:
@@ -336,22 +336,28 @@ class ZhiPuModels(OpenAIBase):
                             
                             # 处理工具调用
                             if chunk.choices[0].delta.tool_calls:
-                                tool_call = chunk.choices[0].delta.tool_calls[0]
-                                if tool_call.function and tool_call.id:
-                                    tool_id = tool_call.id
-                                    
-                                    # 初始化工具调用信息
-                                    if tool_id not in tool_calls_collected:
-                                        tool_calls_collected[tool_id] = {
-                                            "id": tool_id,
-                                            "name": tool_call.function.name or "",
+                                for tc in chunk.choices[0].delta.tool_calls:
+                                    if not tc:
+                                        continue
+                                    idx = getattr(tc, "index", None)
+                                    if idx is None:
+                                        idx = 0
+                                    if idx not in tool_calls_collected:
+                                        tool_calls_collected[idx] = {
+                                            "id": "",
+                                            "name": "",
                                             "arguments": ""
                                         }
-                                    
-                                    # 累积参数（流式传递可能是分片的）
-                                    # 注意：tool_call.function.arguments 可能为 None
-                                    if tool_call.function.arguments is not None:
-                                        tool_calls_collected[tool_id]["arguments"] += tool_call.function.arguments
+                                    item = tool_calls_collected[idx]
+                                    if getattr(tc, "id", None):
+                                        item["id"] = tc.id
+                                    fn = getattr(tc, "function", None)
+                                    if fn:
+                                        if getattr(fn, "name", None):
+                                            item["name"] = fn.name
+                                        args_piece = getattr(fn, "arguments", None)
+                                        if args_piece:
+                                            item["arguments"] += args_piece
                             
                             
                             # 如果有内容则yield（实时返回）
@@ -360,7 +366,13 @@ class ZhiPuModels(OpenAIBase):
 
                         # 处理收集到的工具调用，格式化为字符串
                         if tool_calls_collected:
-                            tool_calls_str = self._format_tool_calls(tool_calls_collected)
+                            ordered = {}
+                            for _, item in sorted(tool_calls_collected.items(), key=lambda kv: kv[0]):
+                                tool_id = item.get("id") or ""
+                                if not tool_id:
+                                    tool_id = f"toolcall_{len(ordered)}"
+                                ordered[tool_id] = item
+                            tool_calls_str = self._format_tool_calls(ordered)
                             usage.total_tokens += num_tokens_from_string(tool_calls_str)
                             yield tool_calls_str
                     

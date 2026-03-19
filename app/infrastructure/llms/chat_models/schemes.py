@@ -5,7 +5,6 @@ from pydantic import BaseModel,field_validator
 
 
 class ToolArgsParser:
-    ARGS_STATUS_KEY="__args_status__"
     ARGS_ERROR_KEY="__args_error__"
 
     @staticmethod
@@ -18,8 +17,7 @@ class ToolArgsParser:
             return {}
         if not isinstance(v, str):
             return {
-                ToolArgsParser.ARGS_STATUS_KEY:False,
-                ToolArgsParser.ARGS_ERROR_KEY:"invalid_argument_type",
+                ToolArgsParser.ARGS_ERROR_KEY:"args is invalid.",
             }
 
         s1=v.strip()
@@ -34,13 +32,11 @@ class ToolArgsParser:
         truncated_guess=ToolArgsParser._looks_truncated(s)
         if truncated_guess:
             return {
-                ToolArgsParser.ARGS_STATUS_KEY:False,
-                ToolArgsParser.ARGS_ERROR_KEY:"argument_truncated",
+                ToolArgsParser.ARGS_ERROR_KEY:"args is truncated by llm.",
             }
 
         return {
-            ToolArgsParser.ARGS_STATUS_KEY:False,
-            ToolArgsParser.ARGS_ERROR_KEY:"argument_is_invalid",
+            ToolArgsParser.ARGS_ERROR_KEY:"args is parsed failed.",
         }
 
     

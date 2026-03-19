@@ -218,9 +218,7 @@ class ReActAgent(BaseAgent):
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(original_question))
                         had_push_user_message = True
-                    await self.push_history_message_and_notify_user(
-                            Message.tool_call_message(content, tool_calls=tool_calls)
-                        )
+                    await self.push_history_message_and_notify_user(Message.tool_call_message(content, tool_calls=tool_calls))
                     await self.act(tool_calls)
                 else:
                     if not had_push_user_message:

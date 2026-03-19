@@ -50,12 +50,12 @@ class ToolsFactory:
 
     def _build_fix_hint(self, *, tool_name: str, reason: str, missing: List[str] = None, errors: List[str] = None) -> str:
         payload = {
-            "error": "tool_call_invalid",
+            "error": "tool_call_failed",
             "tool": tool_name,
             "missing": missing or [],
             "errors": errors or [],
             "guidance": [
-                "请重新发起一次工具调用，确保 function.arguments内容正确，且是一个合法的JSON格式。"
+                "please try again. ensure the function.arguments is a valid."
             ],
         }
         return json.dumps(payload, ensure_ascii=False)
@@ -63,26 +63,23 @@ class ToolsFactory:
     async def execute(self, tool_name: str, tool_params: Dict[str, Any]) -> ToolResult:
         """执行工具调用"""
         try:
-            logging.info(f"execute_tool: {tool_name}, params: {tool_params}")
-
             tool = self.get_tool(tool_name)
             if not tool:
                 return ToolErrorResult(f"Tool {tool_name} not found")
 
             # 获取参数解析诊断字段
-            args_status=tool_params.get("__args_status__", True)
-            args_error=tool_params.get("__args_error__")
-            if args_status is False:
+            args_error=tool_params.get("__args_error__") or None
+            if args_error:
                 msg=self._build_fix_hint(
                     tool_name=tool_name,
-                    reason="模型返回的参数信息解析失败",
+                    reason="the tool args from llm is invalid.",
                     missing=[],
-                    errors=[args_error] if args_error else [],
+                    errors=[args_error],
                 )
                 return ToolErrorResult(msg)
 
             # 过滤解析诊断字段，避免影响真实工具执行
-            clean_params={k:v for k,v in tool_params.items() if not k.startswith("__args_")}
+            clean_params={k:v for k,v in tool_params.items() if not k.startswith("__args_error__")}
             tool_params=clean_params
 
             # 检查参数是否有缺失
@@ -90,14 +87,11 @@ class ToolsFactory:
             provided = set(tool_params.keys())
             missing = required - provided
             if missing:
-                errors_out=["missing_required_parameters"]
-                if args_error:
-                    errors_out.append(args_error)
                 msg = self._build_fix_hint(
                     tool_name=tool_name,
-                    reason="模型返回的参数信息缺失必选参数",
+                    reason="the tool args from llm is missing required parameters.",
                     missing=sorted(list(missing)),
-                    errors=errors_out,
+                    errors=["missing required parameters."],
                 )
                 return ToolErrorResult(msg)
 
@@ -106,10 +100,18 @@ class ToolsFactory:
                 try:
                     errors = tool.validate_params(tool_params)  # type: ignore[attr-defined]
                 except Exception as e:
-                    msg = self._build_fix_hint(tool_name=tool_name, reason="模型返回的参数与工具要求不一致", errors=[f"schema_validation_exception:{e}"])
+                    msg = self._build_fix_hint(
+                        tool_name=tool_name, 
+                        reason="the tool call failed.", 
+                        errors=[f"the tool call failed. reason: {e}"]
+                    )
                     return ToolErrorResult(msg)
                 if errors:
-                    msg = self._build_fix_hint(tool_name=tool_name, reason="模型返回的参数与工具要求不一致", errors=errors)
+                    msg = self._build_fix_hint(
+                        tool_name=tool_name, 
+                        reason="the tool call failed.", 
+                        errors=errors
+                    )
                     return ToolErrorResult(msg)
 
             # 可缓存工具：先查缓存

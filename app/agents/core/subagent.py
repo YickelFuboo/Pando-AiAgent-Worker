@@ -264,9 +264,7 @@ When you have completed the task, provide a clear summary of your findings or ac
                     if not is_add_user_message:
                         self.history_messages.append(Message.user_message(original_task))
                         is_add_user_message = True
-                    await self.history_messages.append(
-                        Message.tool_call_message(content, tool_calls=tool_calls)
-                    )
+                    self.history_messages.append(Message.tool_call_message(content, tool_calls=tool_calls))
                     await self.act(tool_calls)
                 else:
                     if not is_add_user_message:
@@ -346,7 +344,6 @@ When you have completed the task, provide a clear summary of your findings or ac
     async def act(self, tool_calls: List[ToolCall]) -> None:
         """Execute tool calls and handle their results"""
         try:
-            had_push_toolcall_message = False
             for toolcall in tool_calls:
                 content, meta = await self.execute_tool(toolcall)
                 self.history_messages.append(

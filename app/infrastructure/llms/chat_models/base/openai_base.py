@@ -33,7 +33,7 @@ class OpenAIBase(LLM):
             
             # 添加对话历史
             if history:
-                messages.extend(history)
+                messages.extend(self._sanitize_history(history))
  
             # 如果有单独的用户问题信息，则添加用户问题信息
             if user_question:
@@ -49,6 +49,63 @@ class OpenAIBase(LLM):
         except Exception as e:
             logging.error(f"Error in _format_openai_message: {e}")
             raise e
+
+    def _sanitize_history(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """清洗历史消息，避免 assistant.tool_calls 与 tool 结果不配对导致 400。"""
+        sanitized: List[Dict[str, Any]] = []
+        pending_tool_ids: set[str] = set()
+
+        for msg in history:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            if role not in {"system", "user", "assistant", "tool"}:
+                continue
+
+            if role == "assistant":
+                tool_calls = msg.get("tool_calls")
+                if not isinstance(tool_calls, list) or not tool_calls:
+                    pending_tool_ids.clear()
+                    sanitized.append(msg)
+                    continue
+
+                ids = {
+                    tc.get("id")
+                    for tc in tool_calls
+                    if isinstance(tc, dict) and isinstance(tc.get("id"), str) and tc.get("id")
+                }
+                if not ids:
+                    pending_tool_ids.clear()
+                    sanitized.append(msg)
+                    continue
+
+                pending_tool_ids = set(ids)
+                sanitized.append(msg)
+                continue
+
+            if role == "tool":
+                tool_call_id = msg.get("tool_call_id")
+                if pending_tool_ids and isinstance(tool_call_id, str) and tool_call_id in pending_tool_ids:
+                    pending_tool_ids.remove(tool_call_id)
+                    sanitized.append(msg)
+                elif not pending_tool_ids:
+                    continue
+                continue
+
+            if pending_tool_ids and sanitized and sanitized[-1].get("role") == "assistant":
+                last = dict(sanitized[-1])
+                last.pop("tool_calls", None)
+                sanitized[-1] = last
+                pending_tool_ids.clear()
+
+            sanitized.append(msg)
+
+        if pending_tool_ids and sanitized and sanitized[-1].get("role") == "assistant":
+            last = dict(sanitized[-1])
+            last.pop("tool_calls", None)
+            sanitized[-1] = last
+
+        return sanitized
 
     def _extract_usage(self, response)->TokenUsage:
         """从响应中提取 token 使用明细（尽量兼容不同 SDK）。"""

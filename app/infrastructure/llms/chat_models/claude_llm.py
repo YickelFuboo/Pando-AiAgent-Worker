@@ -45,7 +45,7 @@ class ClaudeModels(OpenAIBase):
             
             # 添加历史消息
             if history:
-                messages.extend(history)
+                messages.extend(self._sanitize_history(history))
  
             # 如果有单独的用户问题信息，则添加用户消息（包含system prompt）
             if user_question or system_prompt:
@@ -368,8 +368,13 @@ class ClaudeModels(OpenAIBase):
                                 # 累积工具参数
                                 if chunk.delta and chunk.delta.partial_json:
                                     tool_id = chunk.tool_use_id
-                                    if tool_id in tool_calls_collected:
-                                        tool_calls_collected[tool_id]["arguments"] += chunk.delta.partial_json
+                                    if tool_id not in tool_calls_collected:
+                                        tool_calls_collected[tool_id] = {
+                                            "id": tool_id,
+                                            "name": "",
+                                            "arguments": ""
+                                        }
+                                    tool_calls_collected[tool_id]["arguments"] += chunk.delta.partial_json
                             
                             # 统计tokens
                             if content:
