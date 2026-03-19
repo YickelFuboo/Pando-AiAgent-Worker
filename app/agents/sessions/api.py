@@ -65,7 +65,7 @@ async def get_session_messages(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     messages = await SESSION_MANAGER.get_messages(session_id)
-    return [UserMessage(**msg.to_user_message()) for msg in messages if msg.tool_call_id is None]
+    return [UserMessage(**msg.to_user_message()) for msg in messages]
 
 @router.put(
     "/update/{session_id}",
