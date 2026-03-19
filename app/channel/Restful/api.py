@@ -1,5 +1,6 @@
 import logging
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from app.channel.schemes import UserRequest, UserResponse
 from app.agents.sessions.message import Message
 from app.agents.sessions.manager import SESSION_MANAGER
@@ -45,4 +46,37 @@ async def chat(request: UserRequest):
         return UserResponse(session_id=request.session_id, content=response.content)
     except Exception as e:
         logging.error(f"Error in chat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chat_stream", response_class=StreamingResponse)
+async def chat_stream(request: UserRequest) -> StreamingResponse:
+    """流式聊天接口"""
+    try:
+        if request.session_id is None:
+            raise HTTPException(status_code=400, detail="session_id is required")
+
+        session = await SESSION_MANAGER.get_session(request.session_id)
+        if not session:
+            raise HTTPException(status_code=400, detail="Session not found")
+        await SESSION_MANAGER.update_session(
+            request.session_id,
+            channel_type="Restful",
+            metadata={"channel_id": request.session_id},
+        )
+
+        llm = llm_factory.create_model(provider=request.llm_provider, model=request.llm_model)
+        history = await SESSION_MANAGER.get_context(request.session_id, max_messages=20)
+        stream, usage = await llm.chat_stream(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=USER_PROMPT,
+            user_question=request.content,
+            history=history,
+            temperature=0.7,
+        )
+        async def event_stream():
+            async for chunk in stream:
+                yield f"data: {chunk}\n\n"
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+    except Exception as e:
+        logging.error(f"Error in chat_stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))

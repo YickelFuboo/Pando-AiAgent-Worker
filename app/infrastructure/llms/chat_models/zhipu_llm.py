@@ -203,7 +203,7 @@ class ZhiPuModels(OpenAIBase):
                 content="tool_choice 为 'required' 时必须提供 tools",
                 success=False
             ),TokenUsage()
-        
+
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
         )
@@ -274,7 +274,7 @@ class ZhiPuModels(OpenAIBase):
         """OpenAI兼容的工具调用流式实现，支持失败重试"""
         if tool_choice == "required" and not tools:
             return self._create_error_stream("llm error: tool_choice 为 'required' 时必须提供 tools"), TokenUsage()
-        
+
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
         )

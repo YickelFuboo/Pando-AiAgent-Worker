@@ -1,10 +1,10 @@
 import os
-from typing import Dict, Any, Optional
+from typing import Dict,Any,Optional
 import logging
 import difflib
 from pathlib import Path
 from ..base import BaseTool
-from ..schemes import ToolResult, ToolSuccessResult, ToolErrorResult
+from ..schemes import ToolResult,ToolSuccessResult,ToolErrorResult
 
 
 class ReadFileTool(BaseTool):
@@ -61,7 +61,7 @@ class WriteFileTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
+        return "Write content to a file at the given path. Creates parent directories if needed. Use mode='w' to overwrite (first chunk) and mode='a' to append (subsequent chunks) for long content."
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -74,25 +74,33 @@ class WriteFileTool(BaseTool):
                 },
                 "content": {
                     "type": "string",
-                    "description": "The content to write to the file."
+                    "description": "The content to write to the file. Prefer to keep each write chunk small to avoid tool call truncation.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["w","a"],
+                    "description": "w=overwrite (first chunk), a=append (subsequent chunks). Default is w."
                 }
             },
             "required": ["path", "content"]
         }  
 
-    async def execute(self, path: str, content: str, **kwargs) -> ToolResult:
+    async def execute(self, path: str, content: str, mode: str = "w", **kwargs) -> ToolResult:
         try:
             if not path or not path.strip() or content is None:
                 logging.error("参数错误: path=%r, content=%r", path, content)
                 return ToolErrorResult("Missing path or content parameter")     
 
+            open_mode = "a" if mode == "a" else "w"
+
             file_path = Path(path).expanduser().resolve()
 
             file_path.parent.mkdir(parents=True, exist_ok=True)
                   
-            with open(file_path, "w", encoding="utf-8") as f:
+            with open(file_path, open_mode, encoding="utf-8") as f:
                 f.write(content)
-            return ToolSuccessResult(f"Successfully wrote {len(content)} bytes to {path}")
+            action = "appended" if open_mode == "a" else "written"
+            return ToolSuccessResult(f"Successfully {action} {len(content)} bytes to {path} (mode={open_mode})")
             
         except Exception as e:
             logging.error("Failed to write file: path=%r, error=%s", path, e)

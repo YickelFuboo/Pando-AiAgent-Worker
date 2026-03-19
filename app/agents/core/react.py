@@ -1,8 +1,9 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
-from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, WORKSPACE_DIR
+from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, WORKSPACE_DIR, extract_stream_tool_calls
 from app.agents.tools.base import BaseTool
 from app.agents.tools.factory import ToolsFactory
 from app.agents.sessions.message import Message, ToolCall, Function
@@ -217,9 +218,10 @@ class ReActAgent(BaseAgent):
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(original_question))
                         had_push_user_message = True
-                    await self.push_history_message_and_notify_user(Message.tool_call_message(content, tool_calls))
+                    await self.push_history_message_and_notify_user(
+                            Message.tool_call_message(content, tool_calls=tool_calls)
+                        )
                     await self.act(tool_calls)
-                    
                 else:
                     if not had_push_user_message:
                         await self.push_history_message(Message.user_message(original_question))
@@ -267,21 +269,23 @@ class ReActAgent(BaseAgent):
     async def think(self, llm: Any, question: str) -> Tuple[str, List[ToolCall], TokenUsage]:
         """Think about the question. Returns (content, tool_calls, usage)."""
         history = await self.get_history_context()
-        response = None
         tool_calls: List[ToolCall] = []
         try:
             if self.tool_choices == ToolChoice.NONE:
-                response, usage = await llm.chat(
+                stream, usage = await llm.chat_stream(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
                     history=history,
                     temperature=self.temperature,
                 )
-                if not response.success:
-                    raise Exception(response.content)
+                chunks: List[str] = []
+                async for chunk in stream:
+                    chunks.append(chunk)
+                content = "".join(chunks)
+                return content, tool_calls, usage
             else:
-                response, usage = await llm.ask_tools(
+                stream, usage = await llm.ask_tools_stream(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
                     user_question=question,
@@ -290,23 +294,16 @@ class ReActAgent(BaseAgent):
                     tool_choice=self.tool_choices.value,
                     temperature=self.temperature,
                 )
-                
-                # 处理工具调用
-                if response.tool_calls:
-                    for tool_info in response.tool_calls:
-                        if tool_info.name:
-                            tool_calls.append(ToolCall(
-                                id=tool_info.id,
-                                function=Function(
-                                    name=tool_info.name,
-                                    arguments=tool_info.args
-                                )
-                            ))
+                chunks: List[str] = []
+                async for chunk in stream:
+                    chunks.append(chunk)
+                stream_text = "".join(chunks)
+                content, tool_calls = extract_stream_tool_calls(stream_text)
 
                 if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
 
-            return response.content, tool_calls, usage
+                return content, tool_calls, usage
 
         except Exception as e:
             logging.error(f"Error in agent(%s) thinking process: %s", self.agent_type, e)

@@ -150,7 +150,8 @@ class Message(BaseModel):
         if self.tool_calls is not None:
             formatted=[]
             for tc in self.tool_calls:
-                arguments=json.dumps(tc.function.arguments,ensure_ascii=False)
+                filtered={k:v for k,v in tc.function.arguments.items() if not k.startswith("__args_")}
+                arguments=json.dumps(filtered,ensure_ascii=False)
                 formatted.append({"id": tc.id,"type": tc.type,"function": {"name": tc.function.name,"arguments": arguments}})
             message["tool_calls"]=formatted
         if self.name is not None and self.tool_call_id is not None:

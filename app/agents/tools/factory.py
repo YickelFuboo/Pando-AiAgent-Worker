@@ -1,8 +1,8 @@
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any,Dict,List
 from .base import BaseTool
-from .schemes import ToolResult, ToolSuccessResult, ToolErrorResult
+from .schemes import ToolResult,ToolSuccessResult,ToolErrorResult,ToolResultStatus
 from .truncation import Truncate
 
 TOOLS_CACHE_NAME = ("exec",)
@@ -48,6 +48,18 @@ class ToolsFactory:
     def to_params(self) -> List[Dict[str, Any]]:
         return [tool.to_param() for tool in self._tools.values()]
 
+    def _build_fix_hint(self, *, tool_name: str, reason: str, missing: List[str] = None, errors: List[str] = None) -> str:
+        payload = {
+            "error": "tool_call_invalid",
+            "tool": tool_name,
+            "missing": missing or [],
+            "errors": errors or [],
+            "guidance": [
+                "请重新发起一次工具调用，确保 function.arguments内容正确，且是一个合法的JSON格式。"
+            ],
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
     async def execute(self, tool_name: str, tool_params: Dict[str, Any]) -> ToolResult:
         """执行工具调用"""
         try:
@@ -57,13 +69,36 @@ class ToolsFactory:
             if not tool:
                 return ToolErrorResult(f"Tool {tool_name} not found")
 
+            # 获取参数解析诊断字段
+            args_status=tool_params.get("__args_status__", True)
+            args_error=tool_params.get("__args_error__")
+            if args_status is False:
+                msg=self._build_fix_hint(
+                    tool_name=tool_name,
+                    reason="模型返回的参数信息解析失败",
+                    missing=[],
+                    errors=[args_error] if args_error else [],
+                )
+                return ToolErrorResult(msg)
+
+            # 过滤解析诊断字段，避免影响真实工具执行
+            clean_params={k:v for k,v in tool_params.items() if not k.startswith("__args_")}
+            tool_params=clean_params
+
             # 检查参数是否有缺失
             required = set(tool.parameters.get("required", []) or [])
             provided = set(tool_params.keys())
             missing = required - provided
             if missing:
-                msg = f"Missing required parameters: {', '.join(sorted(missing))}"
-                logging.error(msg)
+                errors_out=["missing_required_parameters"]
+                if args_error:
+                    errors_out.append(args_error)
+                msg = self._build_fix_hint(
+                    tool_name=tool_name,
+                    reason="模型返回的参数信息缺失必选参数",
+                    missing=sorted(list(missing)),
+                    errors=errors_out,
+                )
                 return ToolErrorResult(msg)
 
             # 检查参数是否合法
@@ -71,11 +106,10 @@ class ToolsFactory:
                 try:
                     errors = tool.validate_params(tool_params)  # type: ignore[attr-defined]
                 except Exception as e:
-                    logging.error("Tool(%s) schema validation error: %s", tool_name, e)
-                    return ToolErrorResult(f"Tool parameter schema error: {e}")
+                    msg = self._build_fix_hint(tool_name=tool_name, reason="模型返回的参数与工具要求不一致", errors=[f"schema_validation_exception:{e}"])
+                    return ToolErrorResult(msg)
                 if errors:
-                    msg = "Invalid parameters: " + "; ".join(errors)
-                    logging.error("Tool(%s) %s", tool_name, msg)
+                    msg = self._build_fix_hint(tool_name=tool_name, reason="模型返回的参数与工具要求不一致", errors=errors)
                     return ToolErrorResult(msg)
 
             # 可缓存工具：先查缓存
@@ -89,7 +123,7 @@ class ToolsFactory:
             result = await tool.execute(**tool_params)
 
             # 仅对成功结果做超长截断，统一在 Factory 处理；工具无需自行截断
-            if result and self.workspace_path:
+            if result.status == ToolResultStatus.EXECUTE_SUCCESS and self.workspace_path:
                 raw = f"{result.result}"
                 truncated = Truncate.output(
                     raw,

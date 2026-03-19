@@ -6,10 +6,10 @@ from abc import ABC
 from typing import Any, Dict, List, Optional, Tuple
 from app.agents.bus.queues import MESSAGE_BUS
 from app.agents.bus.types import InboundMessage
-from app.agents.core.base import AgentState, ToolChoice
+from app.agents.core.base import AgentState, ToolChoice, extract_stream_tool_calls
 from app.agents.sessions.compaction import SessionCompaction
 from app.agents.tools.factory import ToolsFactory
-from app.agents.sessions.message import Message, Role, ToolCall, Function
+from app.agents.sessions.message import Message, Role, ToolCall
 from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.infrastructure.llms.chat_models.schemes import TokenUsage
@@ -264,7 +264,9 @@ When you have completed the task, provide a clear summary of your findings or ac
                     if not is_add_user_message:
                         self.history_messages.append(Message.user_message(original_task))
                         is_add_user_message = True
-                    self.history_messages.append(Message.tool_call_message(content, tool_calls))
+                    await self.history_messages.append(
+                        Message.tool_call_message(content, tool_calls=tool_calls)
+                    )
                     await self.act(tool_calls)
                 else:
                     if not is_add_user_message:
@@ -298,51 +300,44 @@ When you have completed the task, provide a clear summary of your findings or ac
         finally:
             self.reset()
 
-    async def think(self, llm: Any, task: str) -> Tuple[str, List[ToolCall], TokenUsage]:
+    async def think(self, llm: Any, question: str) -> Tuple[str, List[ToolCall], TokenUsage]:
         """Think about the question"""
         history = self._build_session_for_context()
-
-        response = None
-        tool_calls = []
+        tool_calls: List[ToolCall] = []
         try:
             if self.tool_choices == ToolChoice.NONE:
-                response, usage = await llm.chat(
+                stream, usage = await llm.chat_stream(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
-                    user_question=task,
+                    user_question=question,
                     history=history,
                     temperature=self.temperature,
                 )
-                if not response.success:
-                    raise Exception(response.content)
+                chunks: List[str] = []
+                async for chunk in stream:
+                    chunks.append(chunk)
+                content = "".join(chunks)
+                return content, tool_calls, usage
             else:
-                response, usage = await llm.ask_tools(
+                stream, usage = await llm.ask_tools_stream(
                     system_prompt=self.system_prompt,
                     user_prompt=self.user_prompt,
-                    user_question=task,
+                    user_question=question,
                     history=history,
                     tools=self.available_tools.to_params(),
                     tool_choice=self.tool_choices.value,
                     temperature=self.temperature,
                 )
-                
-                # 处理工具调用
-                if response.tool_calls:
-                    for i, tool_info in enumerate(response.tool_calls):
-                        if tool_info.name:
-                            tool_call = ToolCall(
-                                id=tool_info.id,
-                                function=Function(
-                                    name=tool_info.name,
-                                    arguments=tool_info.args
-                                )
-                            )
-                            tool_calls.append(tool_call)
+                chunks: List[str] = []
+                async for chunk in stream:
+                    chunks.append(chunk)
+                stream_text = "".join(chunks)
+                content, tool_calls = extract_stream_tool_calls(stream_text)
 
                 if not tool_calls and self.tool_choices == ToolChoice.REQUIRED:
                     raise ValueError("Tool calls required but none provided")
 
-            return response.content, tool_calls, usage
+                return content, tool_calls, usage
 
         except Exception as e:
             logging.error(f"Error in subagent think process: %s", e)
@@ -351,6 +346,7 @@ When you have completed the task, provide a clear summary of your findings or ac
     async def act(self, tool_calls: List[ToolCall]) -> None:
         """Execute tool calls and handle their results"""
         try:
+            had_push_toolcall_message = False
             for toolcall in tool_calls:
                 content, meta = await self.execute_tool(toolcall)
                 self.history_messages.append(

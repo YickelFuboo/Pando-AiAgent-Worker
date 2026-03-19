@@ -80,7 +80,7 @@ class OpenAIBase(LLM):
             total=input_tokens+output_tokens+cache_read_tokens+cache_write_tokens
             return TokenUsage(input_tokens=input_tokens,output_tokens=output_tokens,cache_read_tokens=cache_read_tokens,cache_write_tokens=cache_write_tokens,total_tokens=total)
         return TokenUsage(cache_read_tokens=cache_read_tokens,cache_write_tokens=cache_write_tokens)
-    
+
     async def chat(self, 
                   system_prompt: str,
                   user_prompt: str,
@@ -244,7 +244,7 @@ class OpenAIBase(LLM):
                 content="tool_choice 为 'required' 时必须提供 tools",
                 success=False
             ),TokenUsage()
-        
+
         messages = self._format_message(
             system_prompt, user_prompt, user_question, history
         )
@@ -339,7 +339,7 @@ class OpenAIBase(LLM):
                 async def stream_response():
                     nonlocal usage
                     reasoning_start = False
-                    tool_calls_collected = {}  
+                    tool_calls_collected = {}
                     
                     try:
                         async for chunk in response:
@@ -367,22 +367,28 @@ class OpenAIBase(LLM):
                             
                             # 处理工具调用
                             if chunk.choices[0].delta.tool_calls:
-                                tool_call = chunk.choices[0].delta.tool_calls[0]
-                                if tool_call.function and tool_call.id:
-                                    tool_id = tool_call.id
-                                    
-                                    # 初始化工具调用信息
-                                    if tool_id not in tool_calls_collected:
-                                        tool_calls_collected[tool_id] = {
-                                            "id": tool_id,
-                                            "name": tool_call.function.name or "",
+                                for tc in chunk.choices[0].delta.tool_calls:
+                                    if not tc:
+                                        continue
+                                    idx = getattr(tc, "index", None)
+                                    if idx is None:
+                                        idx = 0
+                                    if idx not in tool_calls_collected:
+                                        tool_calls_collected[idx] = {
+                                            "id": "",
+                                            "name": "",
                                             "arguments": ""
                                         }
-                                    
-                                    # 累积参数（流式传递可能是分片的）
-                                    # 注意：tool_call.function.arguments 可能为 None
-                                    if tool_call.function.arguments is not None:
-                                        tool_calls_collected[tool_id]["arguments"] += tool_call.function.arguments
+                                    item = tool_calls_collected[idx]
+                                    if getattr(tc, "id", None):
+                                        item["id"] = tc.id
+                                    fn = getattr(tc, "function", None)
+                                    if fn:
+                                        if getattr(fn, "name", None):
+                                            item["name"] = fn.name
+                                        args_piece = getattr(fn, "arguments", None)
+                                        if args_piece:
+                                            item["arguments"] += args_piece
                             
                             
                             # 如果有内容则yield（实时返回）
@@ -391,7 +397,13 @@ class OpenAIBase(LLM):
 
                         # 处理收集到的工具调用，格式化为字符串
                         if tool_calls_collected:
-                            tool_calls_str = self._format_tool_calls(tool_calls_collected)
+                            ordered = {}
+                            for _, item in sorted(tool_calls_collected.items(), key=lambda kv: kv[0]):
+                                tool_id = item.get("id") or ""
+                                if not tool_id:
+                                    tool_id = f"toolcall_{len(ordered)}"
+                                ordered[tool_id] = item
+                            tool_calls_str = self._format_tool_calls(ordered)
                             usage.total_tokens += num_tokens_from_string(tool_calls_str)
                             yield tool_calls_str
                     

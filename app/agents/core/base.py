@@ -4,11 +4,46 @@ import re
 from abc import ABC
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from app.config.settings import PROJECT_BASE_DIR
 from app.agents.sessions.manager import SESSION_MANAGER
-from app.agents.sessions.message import Role, Message
+from app.agents.sessions.message import Role, Message, ToolCall, Function
 
+
+def extract_stream_tool_calls(text: str) -> Tuple[str, List[ToolCall]]:
+    """从 ask_tools_stream 输出文本中提取 <tool_calls> 块并还原为 ToolCall 列表。"""
+    if not text:
+        return "", []
+
+    m = re.search(r"<tool_calls>[\s\S]*?</tool_calls>", text)
+    if not m:
+        return text, []
+
+    tool_block = m.group(0)
+    content = (text[:m.start()] + text[m.end():]).strip()
+    tool_calls: List[ToolCall] = []
+
+    for jm in re.finditer(r"<tool>\s*([\s\S]*?)\s*</tool>", tool_block):
+        payload = jm.group(1).strip()
+        try:
+            obj = json.loads(payload)
+        except Exception:
+            continue
+        name = obj.get("name") or ""
+        if not name:
+            continue
+        args = obj.get("args")
+        if isinstance(args, str):
+            args = json.loads(args)
+        if not isinstance(args, dict):
+            args = {}
+        tool_calls.append(
+            ToolCall(
+                id=obj.get("id") or "",
+                function=Function(name=name, arguments=args),
+            )
+        )
+    return content, tool_calls
 
 class AgentState(str, Enum):
     """Agent state enumeration"""
