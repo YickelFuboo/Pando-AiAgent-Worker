@@ -24,6 +24,8 @@ from app.agents.api import router as agents_router
 from app.agents.sessions.api import router as sessions_router
 from app.channel.Restful.api import router as restful_router
 from app.infrastructure.llms.api import router as llms_router
+from app.domains.code_analysis.api.git_repo_mgmt import router as git_repo_router
+from app.domains.code_analysis.api.git_auth_mgmt import router as git_auth_router
 
 
 # 创建FastAPI应用
@@ -54,6 +56,8 @@ app.include_router(agents_router, prefix="/api/v1", tags=["Agent列表查询"])
 app.include_router(sessions_router, prefix="/api/v1", tags=["Agent 会话管理"])
 app.include_router(websocket_router, prefix="/api/v1", tags=["WebSocket Channel"])
 app.include_router(restful_router, prefix="/api/v1", tags=["Restful Channel"])
+app.include_router(git_repo_router,prefix="/api/v1",tags=["Git仓库管理"])
+app.include_router(git_auth_router,prefix="/api/v1",tags=["Git认证信息管理"])
 
 
 #==================================
