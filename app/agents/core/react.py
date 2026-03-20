@@ -242,7 +242,7 @@ class ReActAgent(BaseAgent):
                     self.handle_stuck_state()
 
                 # 继续下一步
-                question = self.next_step_prompt
+                question ="" # self.next_step_prompt
 
             # 如果到最大步数未结束任务，则提示用户
             if self._current_step >= self._max_steps:
