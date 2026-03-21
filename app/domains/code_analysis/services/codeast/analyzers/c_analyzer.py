@@ -4,7 +4,7 @@ import re
 import os
 import logging
 from .base import LanguageAnalyzer
-from ...models.model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
+from ..model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
 
 
 # 全局变量存储已加载的语言
@@ -81,7 +81,6 @@ class CAnalyzer(LanguageAnalyzer):
                 name=os.path.basename(self.file_path),
                 file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
                 language=Lang.C,
-                summary="",
                 functions=functions,
                 classes=structs,
                 imports=self.get_imports(content, tree)

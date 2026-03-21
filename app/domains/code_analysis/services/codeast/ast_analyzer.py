@@ -9,7 +9,7 @@ from .analyzers.java_analyzer import JavaAnalyzer
 from .analyzers.go_analyzer import GoAnalyzer
 from .analyzers.cpp_analyzer import CppAnalyzer
 from .analyzers.c_analyzer import CAnalyzer
-from ..models.model import FileInfo, FolderInfo, Language
+from .model import FileInfo, FolderInfo, Language
 
 # 导入其他语言的分析器...
 

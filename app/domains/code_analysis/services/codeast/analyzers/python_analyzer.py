@@ -3,7 +3,7 @@ import ast
 import logging
 from typing import Optional, List
 from .base import LanguageAnalyzer
-from ...models.model import FileInfo, FunctionInfo, ClassInfo, CallInfo, ClassType, FunctionType, Language as Lang
+from ..model import FileInfo, FunctionInfo, ClassInfo, CallInfo, ClassType, FunctionType, Language as Lang
 
 
 class PythonAnalyzer(LanguageAnalyzer):
@@ -48,7 +48,6 @@ class PythonAnalyzer(LanguageAnalyzer):
                 name=os.path.basename(self.file_path),
                 file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
                 language=Lang.PYTHON,
-                summary="",
                 functions=functions,
                 classes=classes,
                 imports=list(imports_map.values())

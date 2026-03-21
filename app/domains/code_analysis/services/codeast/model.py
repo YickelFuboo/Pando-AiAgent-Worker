@@ -116,8 +116,6 @@ class FunctionInfo:
     file_path: str = None      # 文件路径，API可能为None
     start_line: int = None     # 开始行
     end_line: int = None       # 结束行
-    # 信息
-    summary: str = None 
     docstring: str = None     # 文档字符串
     # 方法特有属性
     class_name: str = None     # 所属类名（方法类型时使用）
@@ -142,7 +140,6 @@ class ClassInfo:
     source_code: str = None
     start_line: int = None     # 开始行
     end_line: int = None       # 结束行
-    summary: str = None 
     methods: List[FunctionInfo] = None
     attributes: List[str] = None
     base_classes: List['ClassInfo'] = None  # 父类节点列表
@@ -157,7 +154,6 @@ class FileInfo:
     
     # Non-key fields
     language: str   #Language
-    summary: str
     functions: List[FunctionInfo]
     classes: List[ClassInfo]
     imports: List[str]
@@ -169,6 +165,5 @@ class FolderInfo:
     path: str
     
     # Non-key fields
-    summary: str
     files: List[FileInfo]
     subfolders: List['FolderInfo']

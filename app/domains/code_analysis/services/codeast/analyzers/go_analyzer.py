@@ -4,7 +4,7 @@ import logging
 from tree_sitter import Parser, Language
 from typing import Optional, List
 from .base import LanguageAnalyzer
-from ...models.model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
+from ..model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
 
 # 全局变量存储已加载的语言
 LANGUAGES = {}
@@ -94,7 +94,6 @@ class GoAnalyzer(LanguageAnalyzer):
                 name=os.path.basename(self.file_path),
                 file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
                 language=Lang.GO,
-                summary="",
                 functions=functions,
                 classes=structs,
                 imports=self.get_imports(content, tree),                

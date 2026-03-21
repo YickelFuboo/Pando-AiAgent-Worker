@@ -4,7 +4,7 @@ import logging
 from tree_sitter import Language, Parser
 from typing import Optional, List
 from .base import LanguageAnalyzer
-from ...models.model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
+from ..model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
 
 # 全局变量存储已加载的语言
 LANGUAGES = {}
@@ -78,7 +78,6 @@ class CppAnalyzer(LanguageAnalyzer):
                 name=os.path.basename(self.file_path),
                 file_path=os.path.relpath(self.file_path, self.base_path),
                 language=Lang.CPP,
-                summary="",
                 functions=functions,
                 classes=classes,
                 imports=self.get_imports(content, tree)

@@ -3,7 +3,7 @@ import javalang
 import logging
 from typing import Optional, List
 from .base import LanguageAnalyzer
-from ...models.model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
+from ..model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
 
 
 class JavaAnalyzer(LanguageAnalyzer):
@@ -34,7 +34,6 @@ class JavaAnalyzer(LanguageAnalyzer):
                 name=os.path.basename(self.file_path),
                 file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
                 language=Lang.JAVA,
-                summary="",
                 functions=functions,
                 classes=classes,
                 imports=self.get_imports(content)

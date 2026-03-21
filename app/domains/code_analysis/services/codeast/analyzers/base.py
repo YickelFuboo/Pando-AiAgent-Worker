@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from asyncio import streams
 from typing import Optional
-from ...models.model import FileInfo
+from ..model import FileInfo
 
 
 class LanguageAnalyzer(ABC):
