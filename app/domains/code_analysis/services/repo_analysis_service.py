@@ -612,6 +612,11 @@ class RepoAnalysisService:
     async def delete_repo_analysis_data(
         repo_id: str,
     ) -> None:
+        try:
+            await FileAnalysisService.stop_analysis(repo_id)
+        except Exception as e:
+            logging.warning("停止文件分析 worker 失败 repo_id=%s error=%s", repo_id, e)
+
         async with get_db_session() as db:
             task = await db.scalar(select(RepoAnalysisTask).where(RepoAnalysisTask.repo_id == repo_id))
             if task and task.scan_status == RepoAnalysisStatus.RUNNING.value:

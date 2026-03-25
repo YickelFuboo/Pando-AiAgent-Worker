@@ -138,6 +138,25 @@ class FileAnalysisService:
         FileAnalysisService._running_tasks[repo_id] = running_task
 
     @staticmethod
+    async def stop_analysis(
+        repo_id: str,
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        """停止指定仓库的文件分析 worker（用于删除分析数据前的并发保护）。"""
+        running_task = FileAnalysisService._running_tasks.get(repo_id)
+        if not running_task or running_task.done():
+            FileAnalysisService._running_tasks.pop(repo_id, None)
+            return
+
+        running_task.cancel()
+        try:
+            await asyncio.wait_for(running_task, timeout=timeout_seconds)
+        except Exception:
+            pass
+
+        FileAnalysisService._running_tasks.pop(repo_id, None)
+
+    @staticmethod
     def _get_repo_pool_semaphore() -> asyncio.Semaphore:
         if FileAnalysisService._repo_pool_semaphore is None:
             FileAnalysisService._repo_pool_semaphore = asyncio.Semaphore(FileAnalysisService._MAX_CONCURRENT_REPO_POOLS)
@@ -177,22 +196,35 @@ class FileAnalysisService:
                 return None
             # 标记记录为运行中
             now = datetime.now()
-            updated = await db.execute(
-                update(RepoFileAnalysisState)
-                .where(
-                    RepoFileAnalysisState.id == state.id,
-                    RepoFileAnalysisState.status.in_([FileAnalysisStatus.PENDING.value, FileAnalysisStatus.FAILED.value]),
+            try:
+                updated = await db.execute(
+                    update(RepoFileAnalysisState)
+                    .where(
+                        RepoFileAnalysisState.id == state.id,
+                        RepoFileAnalysisState.status.in_([FileAnalysisStatus.PENDING.value, FileAnalysisStatus.FAILED.value]),
+                    )
+                    .values(
+                        status=FileAnalysisStatus.RUNNING.value,
+                        last_started_at=now,
+                        last_error=None,
+                    )
                 )
-                .values(
-                    status=FileAnalysisStatus.RUNNING.value,
-                    last_started_at=now,
-                    last_error=None,
+                if (updated.rowcount or 0) == 0: # 如果更新失败，则回滚
+                    await db.rollback()
+                    return None
+                await db.commit()
+            except Exception as e:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                logging.warning(
+                    "标记 repo_file_analysis_state 为 RUNNING 失败 repo_id=%s record_id=%s error=%s",
+                    repo_id,
+                    state.id,
+                    e,
                 )
-            )
-            if (updated.rowcount or 0) == 0: # 如果更新失败，则回滚
-                await db.rollback()
                 return None
-            await db.commit()
             return state
 
     @staticmethod
