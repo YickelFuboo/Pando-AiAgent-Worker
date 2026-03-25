@@ -91,10 +91,40 @@ class ToolArgsParser:
 
     @staticmethod
     def _looks_truncated(s: str) -> bool:
-        t=s.strip()
-        if not t.startswith("{"):
+        if "{" not in s: # 如果s中不包含大括号，则认为没有被截断了
             return False
-        return not t.endswith("}")
+        if not s.rstrip().endswith("}"): # 如果最后一个字符不是大括号，则认为被截断了
+            return True
+        return ToolArgsParser._final_brace_depth(s)>0 # 如果最后一个大括号的深度大于0，则认为被截断了
+
+    @staticmethod
+    def _final_brace_depth(text: str) -> int:
+        # 计算最后一个大括号的深度
+        i=0
+        n=len(text)
+        depth=0
+        in_str=False
+        esc=False
+        while i<n:
+            ch=text[i]
+            if in_str:
+                if esc:
+                    esc=False
+                elif ch=="\\":
+                    esc=True
+                elif ch=='"':
+                    in_str=False
+            else:
+                if ch=='"':
+                    in_str=True
+                elif ch=="{":
+                    depth+=1
+                elif ch=="}":
+                    depth-=1
+                    if depth<0:
+                        depth=0
+            i+=1
+        return depth
 
 
 class TokenUsage(BaseModel):

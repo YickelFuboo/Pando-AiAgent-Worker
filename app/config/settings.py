@@ -124,6 +124,13 @@ class Settings(BaseSettings):
     # =============================================================================
 
     # =============================================================================
+    # 代码仓分析 - 行切片（codchunk/code_chunk）
+    # =============================================================================
+    code_analysis_line_chunk_target_lines: int = Field(default=5, description="行切片目标窗口行数", env="CODE_ANALYSIS_LINE_CHUNK_TARGET_LINES")
+    code_analysis_line_chunk_overlap_lines: int = Field(default=1, description="行切片滑动重叠行数", env="CODE_ANALYSIS_LINE_CHUNK_OVERLAP_LINES")
+    code_analysis_line_chunk_max_lines: int = Field(default=200, description="单行切片经扩展后的最大行数上限", env="CODE_ANALYSIS_LINE_CHUNK_MAX_LINES")
+
+    # =============================================================================
     # Web搜索配置 - Web Search
     # =============================================================================
     # Tavily搜索API配置

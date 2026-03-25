@@ -26,6 +26,8 @@ from app.channel.Restful.api import router as restful_router
 from app.infrastructure.llms.api import router as llms_router
 from app.domains.code_analysis.api.git_repo_mgmt import router as git_repo_router
 from app.domains.code_analysis.api.git_auth_mgmt import router as git_auth_router
+from app.domains.code_analysis.api.repo_analysis import router as code_analysis_router
+from app.domains.code_analysis.services.file_analysis_service import FileAnalysisService
 
 
 # 创建FastAPI应用
@@ -58,6 +60,7 @@ app.include_router(websocket_router, prefix="/api/v1", tags=["WebSocket Channel"
 app.include_router(restful_router, prefix="/api/v1", tags=["Restful Channel"])
 app.include_router(git_repo_router,prefix="/api/v1",tags=["Git仓库管理"])
 app.include_router(git_auth_router,prefix="/api/v1",tags=["Git认证信息管理"])
+app.include_router(code_analysis_router,prefix="/api/v1",tags=["代码仓分析"])
 
 
 #==================================
@@ -107,6 +110,12 @@ async def startup_event():
         else:
             logging.info("当前进程未启用 Cron (RUN_CRON=false)")
 
+        started = FileAnalysisService.start_global_scheduler()
+        if started:
+            logging.info("代码分析全局调度已启动")
+        else:
+            logging.info("代码分析全局调度已在运行")
+
         logging.info(f"{APP_NAME} v{APP_VERSION} 启动成功")
 
     except Exception as e:
@@ -130,6 +139,9 @@ async def shutdown_event():
     if settings.run_cron:
         CRON_MANAGER.stop()
         logging.info("Cron 调度已停止")
+
+    await FileAnalysisService.stop_global_scheduler()
+    logging.info("代码分析全局调度已停止")
 
     try:
         # 关闭数据库连接

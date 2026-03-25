@@ -1,8 +1,9 @@
-from typing import Optional, AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession
 import logging
-import time
 import asyncio
+import time
+from contextlib import asynccontextmanager
+from typing import Optional,AsyncGenerator
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.database.base import AsyncBaseConnection, DatabaseConfig
 from app.infrastructure.database.sql_connect import SQLConnection
 from app.config.settings import settings
@@ -111,9 +112,19 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     conn = await _database_factory.get_connection()
     if not conn:
         raise RuntimeError("数据库连接不可用")
-    
+
     async with conn.get_session() as session:
         yield session
+
+@asynccontextmanager
+async def get_db_session():
+    """获取数据库会话上下文 - 适用于后台任务；内部复用 get_db。"""
+    agen = get_db()
+    try:
+        session = await agen.__anext__()
+        yield session
+    finally:
+        await agen.aclose()
 
 async def close_db():
     """关闭数据库连接"""

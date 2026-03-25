@@ -1,6 +1,6 @@
-
 import logging
-from app.codesummary.models.model import ContentType
+from typing import List
+from app.domains.code_analysis.services.codesummary.model import ContentType
 from app.infrastructure.llms import llm_factory
 
 
@@ -34,6 +34,20 @@ FOLDER_SUMMARY_PROMPT = """请基于如下文件夹（模块）中子文件夹�
 功能：文件夹（模块）主要功能描述
 """
 
+
+def _is_stream_error_text(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    if t.startswith("llm error:"):
+        return True
+    if t.startswith("Invalid response"):
+        return True
+    if "Unexpected error: max retries exceeded" in t:
+        return True
+    return False
+
+
 class CodeSummary:
 
     @staticmethod
@@ -66,18 +80,20 @@ class CodeSummary:
                 return ""
 
             llm = llm_factory.create_model()
-
-
-            response, token_count = await llm.chat(
+            stream, _usage = await llm.chat_stream(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                user_question=content
+                user_question=content,
             )
-
-            logging.info(f"{content_type}摘要: {response.content}")
-
-            return response.content if response.success else f"无法生成{content_type}摘要" 
+            chunks: List[str] = []
+            async for chunk in stream:
+                chunks.append(chunk)
+            full = "".join(chunks)
+            logging.info(f"{content_type}摘要: {full}")
+            if _is_stream_error_text(full):
+                return ""
+            return full
         
         except Exception as e:
             logging.error(f"生成{content_type}摘要失败: {e}")
-            return f"无法生成{content_type}摘要"
+            return ""
