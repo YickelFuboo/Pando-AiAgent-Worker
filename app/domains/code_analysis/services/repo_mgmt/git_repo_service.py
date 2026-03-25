@@ -14,6 +14,7 @@ from sqlalchemy import select, delete, update, and_, or_
 from fastapi import UploadFile
 from app.config.settings import settings
 from app.domains.code_analysis.schemes.git_repo_mgmt import CreateRepositoryFromUrl, UpdateRepository, RepositoryInfo
+from app.domains.code_analysis.services.repo_analysis_service import RepoAnalysisService
 from app.domains.code_analysis.services.repo_mgmt.remote_git_service import RemoteGitService
 from app.domains.code_analysis.models.git_repo_mgmt import ProcessingStatus, GitRepository
 
@@ -408,7 +409,12 @@ class GitRepositoryService:
             raise
     
     @staticmethod
-    async def delete_repository(db: AsyncSession, repository_id: str, user_id: str) -> bool:
+    async def delete_repository(
+        db: AsyncSession,
+        repository_id: str,
+        user_id: str,
+        delete_local: bool = False,
+    ) -> bool:
         """删除仓库"""
         try:
             repository = await GitRepositoryService.get_repository_by_id(db, repository_id)
@@ -418,8 +424,14 @@ class GitRepositoryService:
             if repository.user_id != user_id:
                 raise ValueError("无权限删除仓库")
             
+            # 清理该仓库的分析数据（文件分析状态 + 相关向量）
+            try:
+                await RepoAnalysisService.delete_repo_analysis_data(repository_id)
+            except Exception as e:
+                logging.warning("删除仓库前清理分析数据失败 repo_id=%s error=%s", repository_id,e)
+
             # 删除本地文件
-            if repository.local_path and os.path.exists(repository.local_path):
+            if delete_local and repository.local_path and os.path.exists(repository.local_path):
                 shutil.rmtree(repository.local_path)
             
             await db.execute(delete(GitRepository).where(GitRepository.id == repository_id))

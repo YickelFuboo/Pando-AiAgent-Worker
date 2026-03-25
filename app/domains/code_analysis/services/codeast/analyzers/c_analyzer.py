@@ -1,8 +1,9 @@
-from tree_sitter import Language, Parser
-from typing import Optional, List
 import re
 import os
 import logging
+from typing import Optional, List
+import tree_sitter_c as tsc
+from tree_sitter import Language, Parser
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
 
@@ -14,18 +15,10 @@ def get_language():
     """获取或初始化 C 语言解析器"""
     if 'c' not in LANGUAGES:
         try:
-            # 构建语言库
-            Language.build_library(
-                'build/my-languages.so',
-                [
-                    'vendor/tree-sitter-c'
-                ]
-            )
-            # 加载语言
-            LANGUAGES['c'] = Parser()
-            LANGUAGES['c'].set_language(
-                Language.load('build/my-languages.so')
-            )
+            c_lang = Language(tsc.language())
+            parser = Parser()
+            parser.language = c_lang
+            LANGUAGES['c'] = parser
         except Exception as e:
             logging.error(f"Error loading C language: {str(e)}")
             return None

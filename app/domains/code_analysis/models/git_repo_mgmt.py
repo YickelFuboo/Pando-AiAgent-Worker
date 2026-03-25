@@ -40,7 +40,7 @@ class GitRepository(Base):
     created_at = Column(DateTime,nullable=False,server_default=func.now())
     updated_at = Column(DateTime,nullable=False,server_default=func.now(),onupdate=func.now())
 
-    wiki_documents = relationship("RepoWikiDocument", back_populates="repository")
+    #wiki_documents = relationship("RepoWikiDocument", back_populates="repository")
 
     def to_dict(self):
         """转换为字典"""

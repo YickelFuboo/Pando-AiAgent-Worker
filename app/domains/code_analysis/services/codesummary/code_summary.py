@@ -1,3 +1,4 @@
+import re
 import logging
 from typing import List
 from app.domains.code_analysis.services.codesummary.model import ContentType
@@ -48,6 +49,13 @@ def _is_stream_error_text(text: str) -> bool:
     return False
 
 
+def _strip_think_tags(text: str) -> str:
+    if not text:
+        return ""
+    pattern = r"<\s*think\s*>.*?<\s*/\s*think\s*>"
+    return re.sub(pattern,"",text,flags=re.IGNORECASE|re.DOTALL).strip()
+
+
 class CodeSummary:
 
     @staticmethod
@@ -89,10 +97,12 @@ class CodeSummary:
             async for chunk in stream:
                 chunks.append(chunk)
             full = "".join(chunks)
-            logging.info(f"{content_type}摘要: {full}")
             if _is_stream_error_text(full):
                 return ""
-            return full
+
+            # 过滤掉模型结果中的think内容
+            result = _strip_think_tags(full).strip()
+            return result
         
         except Exception as e:
             logging.error(f"生成{content_type}摘要失败: {e}")

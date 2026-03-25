@@ -303,13 +303,13 @@ class FileAnalysisService:
     ) -> Dict[str, object]:
         normalized_file_path = rel_file_path.replace("\\", "/").strip("/")
         async with get_db_session() as db:
-            state = await db.scalar(
+            record = await db.scalar(
                 select(RepoFileAnalysisState).where(
                     RepoFileAnalysisState.repo_id == repo_id,
                     RepoFileAnalysisState.file_path == normalized_file_path,
                 )
             )
-            if state and state.status == FileAnalysisStatus.RUNNING.value and not force:
+            if record and record.status == FileAnalysisStatus.RUNNING.value and not force:
                 raise ValueError("该文件分析任务正在运行，无法删除（可使用 force=true 强制删除）")
             
             # 删除文件分析状态记录

@@ -1,8 +1,9 @@
 import re
 import os
 import logging
-from tree_sitter import Language, Parser
 from typing import Optional, List
+import tree_sitter_cpp as tscpp
+from tree_sitter import Language, Parser
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
 
@@ -13,18 +14,10 @@ def get_language():
     """获取或初始化 C++ 语言解析器"""
     if 'cpp' not in LANGUAGES:
         try:
-            # 构建语言库
-            Language.build_library(
-                'build/my-languages.so',
-                [
-                    'vendor/tree-sitter-cpp'
-                ]
-            )
-            # 加载语言
-            LANGUAGES['cpp'] = Parser()
-            LANGUAGES['cpp'].set_language(
-                Language.load('build/my-languages.so')
-            )
+            cpp_lang = Language(tscpp.language())
+            parser = Parser()
+            parser.language = cpp_lang
+            LANGUAGES['cpp'] = parser
         except Exception as e:
             logging.error(f"Error loading C++ language: {str(e)}")
             return None

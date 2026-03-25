@@ -51,7 +51,13 @@ class SQLConnection(AsyncBaseConnection):
                 autoflush=False,
                 expire_on_commit=False
             )
-            
+            # SQLite 并发写时容易触发 locked，提前启用 WAL 与忙等待。
+            if self.db_type == 'sqlite':
+                async with self.engine.connect() as conn:
+                    await conn.execute(text("PRAGMA journal_mode=WAL"))
+                    await conn.execute(text("PRAGMA synchronous=NORMAL"))
+                    await conn.execute(text("PRAGMA busy_timeout=30000"))
+                    await conn.commit()
             logging.info(f"{self.db_name}异步数据库连接创建成功")
             return self.engine
             
@@ -80,7 +86,9 @@ class SQLConnection(AsyncBaseConnection):
             engine_config.pop('pool_size', None)
             engine_config.pop('max_overflow', None)
             connect_args.update({
-                'check_same_thread': False
+                'check_same_thread': False,
+                # 让底层 sqlite3 在遇到锁时等待一段时间再报错
+                'timeout': 30
             })
         elif self.db_type in ['oracle']:
             connect_args.update({

@@ -7,6 +7,7 @@ from sqlalchemy import delete,func,or_,select,update
 from sqlalchemy.exc import IntegrityError
 from app.domains.code_analysis.models.analysis_status import FileAnalysisStatus,RepoAnalysisStatus,RepoAnalysisTask,RepoFileAnalysisState
 from app.domains.code_analysis.models.git_repo_mgmt import GitRepository
+from app.domains.code_analysis.services.file_analysis_service import FileAnalysisService
 from app.infrastructure.database import get_db_session
 
 
@@ -512,7 +513,6 @@ class RepoAnalysisService:
                 "completed_files": by_status.get(FileAnalysisStatus.COMPLETED.value, 0),
                 "failed_files": by_status.get(FileAnalysisStatus.FAILED.value, 0),
                 "skipped_files": by_status.get(FileAnalysisStatus.SKIPPED.value, 0),
-                "by_status": by_status,
             }
             return {
                 "repo_id": repo_id,
@@ -536,3 +536,42 @@ class RepoAnalysisService:
                     "scan_heartbeat_at": None,
                 }
             return RepoAnalysisService._scan_task_to_dict(task, None)
+
+    @staticmethod
+    async def delete_repo_analysis_data(
+        repo_id: str,
+    ) -> None:
+        # 仅当“非扫描中”时才执行清理；若扫描中则直接失败，让上层在空闲时重试。
+        async with get_db_session() as db:
+            task = await db.scalar(select(RepoAnalysisTask).where(RepoAnalysisTask.repo_id == repo_id))
+            if task and task.scan_status == RepoAnalysisStatus.RUNNING.value:
+                raise RuntimeError("repo scan is running, skip delete_repo_analysis_data")
+
+            await db.execute(
+                delete(RepoAnalysisTask).where(RepoAnalysisTask.repo_id == repo_id)
+            )
+
+            file_paths = (
+                await db.scalars(
+                    select(RepoFileAnalysisState.file_path).where(
+                        RepoFileAnalysisState.repo_id == repo_id
+                    )
+                )
+            ).all()
+
+            await db.commit()
+
+        for rel_file_path in file_paths:
+            try:
+                await FileAnalysisService.delete_file_analysis_data(
+                    repo_id=repo_id,
+                    rel_file_path=rel_file_path,
+                    force=True,
+                )
+            except Exception as e:
+                logging.warning(
+                    "删除 repo 文件分析数据失败 repo_id=%s file_path=%s error=%s",
+                    repo_id,
+                    rel_file_path,
+                    e,
+                )

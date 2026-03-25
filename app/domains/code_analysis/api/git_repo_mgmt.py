@@ -78,6 +78,26 @@ async def create_repository_from_path(
             detail=str(e)
         )
 
+@router.get("/list", response_model=List[RepositoryInfo])
+async def get_repository_list(
+    user_id: str = Query(..., description="用户ID"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    keyword: str = Query(None, description="搜索关键词"),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取仓库列表"""
+    try:    
+        repositories, total = await GitRepositoryService.get_repository_list(
+            db, user_id, page, page_size, keyword
+        )
+        return repositories
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取仓库列表失败: {str(e)}"
+        )
+
 @router.get("/{repository_id}", response_model=RepositoryInfo)
 async def get_repository(
     repository_id: str,
@@ -106,26 +126,6 @@ async def get_repository(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取仓库失败: {str(e)}"
-        )
-
-@router.get("/list", response_model=List[RepositoryInfo])
-async def get_repository_list(
-    user_id: str = Query(..., description="用户ID"),
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
-    keyword: str = Query(None, description="搜索关键词"),
-    db: AsyncSession = Depends(get_db)
-):
-    """获取仓库列表"""
-    try:    
-        repositories, total = await GitRepositoryService.get_repository_list(
-            db, user_id, page, page_size, keyword
-        )
-        return repositories
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取仓库列表失败: {str(e)}"
         )
 
 @router.put("/{repository_id}", response_model=RepositoryInfo)
@@ -157,11 +157,12 @@ async def update_repository(
 async def delete_repository(
     repository_id: str,
     user_id: str = Query(..., description="用户ID"),
+    delete_local: bool = Query(False, description="是否同步删除本地git目录内容"),
     db: AsyncSession = Depends(get_db)
 ):
     """删除仓库"""
     try:
-        success = await GitRepositoryService.delete_repository(db, repository_id, user_id)
+        success = await GitRepositoryService.delete_repository(db, repository_id, user_id, delete_local=delete_local)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
