@@ -8,7 +8,7 @@ from app.domains.code_analysis.constants import line_chunk_space_name,symbol_sum
 from app.domains.code_analysis.models.analysis_status import FileAnalysisStatus,RepoFileAnalysisState
 from app.domains.code_analysis.models.git_repo_mgmt import GitRepository
 from app.domains.code_analysis.services.codeast.ast_analyzer import FileAstAnalyzer
-from app.domains.code_analysis.services.codchunk.code_chunk import CodeChunkService
+from app.domains.code_analysis.services.codechunk.code_chunk import CodeChunkService
 from app.domains.code_analysis.services.codevector.code_vector import CodeVectorService
 from app.infrastructure.database import get_db_session
 from app.infrastructure.llms import embedding_factory

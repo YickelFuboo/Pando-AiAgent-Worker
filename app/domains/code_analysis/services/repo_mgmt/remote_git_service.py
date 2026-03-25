@@ -6,7 +6,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 import git
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.domains.code_analysis.service.repo_mgmt.git_auth_service import GitAuthService
+from app.domains.code_analysis.services.repo_mgmt.git_auth_service import GitAuthService
 
 
 class GitRepoInfo:

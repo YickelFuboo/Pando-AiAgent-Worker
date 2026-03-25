@@ -5,7 +5,7 @@ from typing import Dict,List,Optional,Tuple
 from app.domains.code_analysis.constants import line_chunk_space_name,symbol_summary_space_name
 from app.domains.code_analysis.models.analysis_status import RepoAnalysisType as AnalysisType
 from app.domains.code_analysis.services.codeast.model import FileInfo
-from app.domains.code_analysis.services.codchunk.code_chunk import LineTextChunk
+from app.domains.code_analysis.services.codechunk.code_chunk import LineTextChunk
 from app.domains.code_analysis.services.codesummary.code_summary import CodeSummary
 from app.domains.code_analysis.services.codesummary.model import ContentType
 from app.infrastructure.llms import embedding_factory

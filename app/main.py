@@ -26,7 +26,8 @@ from app.channel.Restful.api import router as restful_router
 from app.infrastructure.llms.api import router as llms_router
 from app.domains.code_analysis.api.git_repo_mgmt import router as git_repo_router
 from app.domains.code_analysis.api.git_auth_mgmt import router as git_auth_router
-from app.domains.code_analysis.api.repo_analysis import router as code_analysis_router
+from app.domains.code_analysis.api.code_search import router as code_search_router
+from app.domains.code_analysis.api.code_analysis import router as code_analysis_router
 from app.domains.code_analysis.services.file_analysis_service import FileAnalysisService
 
 
@@ -61,6 +62,7 @@ app.include_router(restful_router, prefix="/api/v1", tags=["Restful Channel"])
 app.include_router(git_repo_router,prefix="/api/v1",tags=["Git仓库管理"])
 app.include_router(git_auth_router,prefix="/api/v1",tags=["Git认证信息管理"])
 app.include_router(code_analysis_router,prefix="/api/v1",tags=["代码仓分析"])
+app.include_router(code_search_router,prefix="/api/v1",tags=["代码检索"])
 
 
 #==================================

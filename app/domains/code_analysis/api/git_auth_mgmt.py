@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.database import get_db
 from app.domains.code_analysis.schemes.git_auth_mgmt import GitAuthResponse, GitAuthListResponse, GitAuthProvider
-from app.domains.code_analysis.service.repo_mgmt.git_auth_service import GitAuthService
+from app.domains.code_analysis.services.repo_mgmt.git_auth_service import GitAuthService
 
 
 router = APIRouter(prefix="/git-auth",tags=["认证信息管理"])

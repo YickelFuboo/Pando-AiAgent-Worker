@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.database import get_db
 from app.domains.code_analysis.schemes.git_repo_mgmt import CreateRepositoryFromUrl, UpdateRepository, RepositoryInfo
-from app.domains.code_analysis.service.repo_mgmt.git_repo_service import GitRepositoryService
+from app.domains.code_analysis.services.repo_mgmt.git_repo_service import GitRepositoryService
 
 router = APIRouter(prefix="/git-repos", tags=["仓库管理"])
 

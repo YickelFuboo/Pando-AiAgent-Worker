@@ -14,7 +14,7 @@ from sqlalchemy import select, delete, update, and_, or_
 from fastapi import UploadFile
 from app.config.settings import settings
 from app.domains.code_analysis.schemes.git_repo_mgmt import CreateRepositoryFromUrl, UpdateRepository, RepositoryInfo
-from app.domains.code_analysis.service.repo_mgmt.remote_git_service import RemoteGitService
+from app.domains.code_analysis.services.repo_mgmt.remote_git_service import RemoteGitService
 from app.domains.code_analysis.models.git_repo_mgmt import ProcessingStatus, GitRepository
 
 
