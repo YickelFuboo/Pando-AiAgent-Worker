@@ -2,17 +2,14 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Optional
-from sqlalchemy import delete, select, update
-from app.domains.code_analysis.constants import line_chunk_space_name,symbol_summary_space_name
+from typing import Dict,Optional
+from sqlalchemy import delete,select,update
 from app.domains.code_analysis.models.analysis_status import FileAnalysisStatus,RepoFileAnalysisState
 from app.domains.code_analysis.models.git_repo_mgmt import GitRepository
 from app.domains.code_analysis.services.codeast.ast_analyzer import FileAstAnalyzer
 from app.domains.code_analysis.services.codechunk.code_chunk import CodeChunkService
 from app.domains.code_analysis.services.codevector.code_vector import CodeVectorService
 from app.infrastructure.database import get_db_session
-from app.infrastructure.llms import embedding_factory
-from app.infrastructure.vector_store import VECTOR_STORE_CONN
 
 
 class FileAnalysisService:
@@ -322,7 +319,7 @@ class FileAnalysisService:
             await db.commit()
 
         # 删除向量记录
-        deleted_vectors = await FileAnalysisService._delete_file_vector_records(
+        deleted_vectors = await CodeVectorService.delete_file_vector_records(
             repo_id=repo_id,
             rel_file_path=normalized_file_path,
         )
@@ -333,28 +330,3 @@ class FileAnalysisService:
             "deleted_file_states": int(deleted_states.rowcount or 0),
             "deleted_vector_records": int(deleted_vectors),
         }
-    
-    @staticmethod
-    async def _delete_file_vector_records(
-        repo_id: str,
-        rel_file_path: str,
-    ) -> int:
-        model = embedding_factory.create_model()
-        if not model:
-            return 0
-        
-        vectors, _ = await model.encode(["x"])
-        if vectors is None or len(vectors) == 0:
-            return 0
-        dim = len(vectors[0])
-        spaces = [
-            line_chunk_space_name(repo_id, dim),
-            symbol_summary_space_name(repo_id, dim),
-        ]
-
-        deleted = 0
-        for space_name in spaces:
-            if not await VECTOR_STORE_CONN.space_exists(space_name):
-                continue
-            deleted += int(await VECTOR_STORE_CONN.delete_records(space_name, {"repo_id": repo_id, "file_path": rel_file_path}))
-        return deleted

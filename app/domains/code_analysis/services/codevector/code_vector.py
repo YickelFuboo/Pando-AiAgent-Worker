@@ -288,3 +288,50 @@ class CodeVectorService:
         """用仓、路径、分析类型、行号与附加键生成 SHA1 稳定记录 ID，便于幂等更新。"""
         raw = f"{repo_id}|{file_path}|{analysis_type}|{start_line}|{end_line}|{extra}"
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    async def delete_repo_vector_records(repo_id: str) -> int:
+        """按 repo_id 删除整仓向量记录（不依赖具体 file_path）。"""
+        model = embedding_factory.create_model()
+        if not model:
+            return 0
+        
+        vectors, _ = await model.encode(["x"])
+        if vectors is None or len(vectors) == 0:
+            return 0
+        dim = len(vectors[0])
+
+
+        spaces = [
+            line_chunk_space_name(repo_id, dim),
+            symbol_summary_space_name(repo_id, dim),
+        ]        
+        deleted = 0
+        for space_name in spaces:
+            if not await VECTOR_STORE_CONN.space_exists(space_name):
+                continue
+            deleted += int(await VECTOR_STORE_CONN.delete_records(space_name, {"repo_id": repo_id}))
+        return deleted
+
+    @staticmethod
+    async def delete_file_vector_records(repo_id: str, rel_file_path: str) -> int:
+        """按 repo_id + file_path 删除指定文件的向量记录。"""
+        model = embedding_factory.create_model()
+        if not model:
+            return 0
+
+        vectors, _ = await model.encode(["x"])
+        if vectors is None or len(vectors) == 0:
+            return 0
+        dim = len(vectors[0])
+
+        spaces = [
+            line_chunk_space_name(repo_id, dim),
+            symbol_summary_space_name(repo_id, dim),
+        ]
+        deleted = 0
+        for space_name in spaces:
+            if not await VECTOR_STORE_CONN.space_exists(space_name):
+                continue
+            deleted += int(await VECTOR_STORE_CONN.delete_records(space_name, {"repo_id": repo_id, "file_path": rel_file_path}))
+        return deleted

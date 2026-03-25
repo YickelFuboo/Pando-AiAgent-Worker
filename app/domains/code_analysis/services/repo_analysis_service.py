@@ -8,7 +8,12 @@ from sqlalchemy.exc import IntegrityError
 from app.domains.code_analysis.models.analysis_status import FileAnalysisStatus,RepoAnalysisStatus,RepoAnalysisTask,RepoFileAnalysisState
 from app.domains.code_analysis.models.git_repo_mgmt import GitRepository
 from app.domains.code_analysis.services.file_analysis_service import FileAnalysisService
+from app.domains.code_analysis.services.codevector.code_vector import CodeVectorService
 from app.infrastructure.database import get_db_session
+
+
+class RepoScanCancelled(Exception):
+    """扫描协作取消（通过数据库的 scan_status 触发）。"""
 
 
 class RepoAnalysisService:
@@ -107,6 +112,15 @@ class RepoAnalysisService:
             "target_rel_path": normalized_target_rel_path,
             "is_directory": is_directory,
         } 
+
+    @staticmethod
+    async def _assert_scan_is_running(db, repo_id: str) -> None:
+        """如果上层已把 scan_status 从 RUNNING 改掉，则尽快停止扫描。"""
+        status_value = await db.scalar(
+            select(RepoAnalysisTask.scan_status).where(RepoAnalysisTask.repo_id == repo_id)
+        )
+        if status_value != RepoAnalysisStatus.RUNNING.value:
+            raise RepoScanCancelled("scan cancelled by scan_status change")
     
     @staticmethod
     async def _acquire_scan_lock(
@@ -161,6 +175,9 @@ class RepoAnalysisService:
         is_directory: bool,
     ) -> None:
         try:
+            async with get_db_session() as db:
+                await RepoAnalysisService._assert_scan_is_running(db, repo_id)
+            
             if target_rel_path is not None and not is_directory:
                 scanned_count = 0
                 async with get_db_session() as db:
@@ -190,6 +207,13 @@ class RepoAnalysisService:
                 repo_id=repo_id,
                 status=RepoAnalysisStatus.COMPLETED.value,
                 last_error=None,
+            )
+        except RepoScanCancelled as e:
+            logging.info("repo扫描已取消 repo_id=%s error=%s", repo_id, e)
+            await RepoAnalysisService._finish_scan_task(
+                repo_id=repo_id,
+                status=RepoAnalysisStatus.FAILED.value,
+                last_error="scan cancelled",
             )
         except Exception as e:
             logging.error("repo扫描失败 repo_id=%s error=%s", repo_id, e)
@@ -222,6 +246,7 @@ class RepoAnalysisService:
             
             # 迭代扫描目录
             for parent_root, dirs, files in RepoAnalysisService._iter_scan_directories(repo_root=repo_root, target_rel_path=target_rel_path):
+                await RepoAnalysisService._assert_scan_is_running(db, repo_id)
                 pruned: List[str] = []
                 for d in dirs:
                     # 过滤排除目录
@@ -415,13 +440,24 @@ class RepoAnalysisService:
             for p in excluded_dirs:
                 conds.append(RepoFileAnalysisState.file_path == p)
                 conds.append(RepoFileAnalysisState.file_path.like(f"{p}/%"))
-            await db.execute(
-                delete(RepoFileAnalysisState).where(
-                    RepoFileAnalysisState.repo_id == repo_id,
-                    or_(*conds),
+            file_paths = (
+                await db.scalars(
+                    select(RepoFileAnalysisState.file_path).where(
+                        RepoFileAnalysisState.repo_id == repo_id,
+                        or_(*conds),
+                    )
                 )
-            )
-            await db.commit()
+            ).all()
+
+        for rel_file_path in file_paths:
+            try:
+                await FileAnalysisService.delete_file_analysis_data(
+                    repo_id=repo_id,
+                    rel_file_path=rel_file_path,
+                    force=True,
+                )
+            except Exception as e:
+                logging.warning("删除 excluded_dirs 下文件分析数据失败 repo_id=%s file_path=%s error=%s", repo_id, rel_file_path, e)
 
     @staticmethod
     async def _finish_scan_task(
@@ -538,40 +574,57 @@ class RepoAnalysisService:
             return RepoAnalysisService._scan_task_to_dict(task, None)
 
     @staticmethod
+    async def stop_scan(
+        repo_id: str,
+        reason: str = "scan stopped by user",
+    ) -> Dict[str, object]:
+        async with get_db_session() as db:
+            task = await db.scalar(select(RepoAnalysisTask).where(RepoAnalysisTask.repo_id == repo_id))
+            if not task:
+                return {
+                    "repo_id": repo_id,
+                    "scan_status": RepoAnalysisStatus.IDLE.value,
+                    "last_error": None,
+                    "last_scan_started_at": None,
+                    "last_scan_finished_at": None,
+                    "scan_heartbeat_at": None,
+                }
+
+            now = datetime.now()
+            task.scan_status = RepoAnalysisStatus.FAILED.value
+            task.last_error = reason
+            task.last_scan_finished_at = now
+            task.scan_heartbeat_at = now
+            await db.commit()
+            await db.refresh(task)
+        
+        running_task = RepoAnalysisService._running_scan_tasks.get(repo_id)
+        if running_task and not running_task.done():
+            running_task.cancel()
+            try:
+                await asyncio.wait_for(running_task, timeout=5)
+            except Exception:
+                pass
+
+        return RepoAnalysisService._scan_task_to_dict(task, None)
+
+    @staticmethod
     async def delete_repo_analysis_data(
         repo_id: str,
     ) -> None:
-        # 仅当“非扫描中”时才执行清理；若扫描中则直接失败，让上层在空闲时重试。
         async with get_db_session() as db:
             task = await db.scalar(select(RepoAnalysisTask).where(RepoAnalysisTask.repo_id == repo_id))
             if task and task.scan_status == RepoAnalysisStatus.RUNNING.value:
-                raise RuntimeError("repo scan is running, skip delete_repo_analysis_data")
-
-            await db.execute(
-                delete(RepoAnalysisTask).where(RepoAnalysisTask.repo_id == repo_id)
-            )
-
-            file_paths = (
-                await db.scalars(
-                    select(RepoFileAnalysisState.file_path).where(
-                        RepoFileAnalysisState.repo_id == repo_id
-                    )
+                await RepoAnalysisService.stop_scan(
+                    repo_id=repo_id,
+                    reason="delete repo analysis data (force stop scan)",
                 )
-            ).all()
 
+            await db.execute(delete(RepoAnalysisTask).where(RepoAnalysisTask.repo_id == repo_id))
+            await db.execute(delete(RepoFileAnalysisState).where(RepoFileAnalysisState.repo_id == repo_id))
             await db.commit()
 
-        for rel_file_path in file_paths:
-            try:
-                await FileAnalysisService.delete_file_analysis_data(
-                    repo_id=repo_id,
-                    rel_file_path=rel_file_path,
-                    force=True,
-                )
-            except Exception as e:
-                logging.warning(
-                    "删除 repo 文件分析数据失败 repo_id=%s file_path=%s error=%s",
-                    repo_id,
-                    rel_file_path,
-                    e,
-                )
+        try:
+            await CodeVectorService.delete_repo_vector_records(repo_id)
+        except Exception as e:
+            logging.warning("删除 repo 向量数据失败 repo_id=%s error=%s", repo_id, e)

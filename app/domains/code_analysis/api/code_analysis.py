@@ -1,5 +1,5 @@
 from typing import Dict
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter,Body,HTTPException,Query,status
 from app.domains.code_analysis.services.repo_analysis_service import RepoAnalysisService
 
 
@@ -31,3 +31,24 @@ async def get_repo_analysis_summary(repo_id: str) -> Dict[str, object]:
 async def get_repo_scan_status(repo_id: str) -> Dict[str, object]:
     """仅扫描任务（仓级）状态，便于轮询。"""
     return await RepoAnalysisService.get_scan_status(repo_id)
+
+
+@router.post("/{repo_id}/stop-scan")
+async def stop_repo_scan(repo_id: str) -> Dict[str, object]:
+    """停止仓库扫描（通过置 scan_status 触发协作取消）。"""
+    try:
+        return await RepoAnalysisService.stop_scan(repo_id)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail=str(e))
+
+
+@router.delete("/{repo_id}/analysis-data")
+async def clear_repo_analysis_data(repo_id: str) -> Dict[str, object]:
+    """清空仓库的分析数据：文件分析状态 + 相关向量数据。"""
+    try:
+        await RepoAnalysisService.delete_repo_analysis_data(repo_id)
+        return {"message":"清空分析数据成功"}
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail=str(e))
