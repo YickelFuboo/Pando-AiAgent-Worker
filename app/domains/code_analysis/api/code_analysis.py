@@ -27,12 +27,6 @@ async def get_repo_analysis_summary(repo_id: str) -> Dict[str, object]:
     return await RepoAnalysisService.get_summary(repo_id)
 
 
-@router.get("/{repo_id}/scan-status")
-async def get_repo_scan_status(repo_id: str) -> Dict[str, object]:
-    """仅扫描任务（仓级）状态，便于轮询。"""
-    return await RepoAnalysisService.get_scan_status(repo_id)
-
-
 @router.post("/{repo_id}/stop-scan")
 async def stop_repo_scan(repo_id: str) -> Dict[str, object]:
     """停止仓库扫描（通过置 scan_status 触发协作取消）。"""
