@@ -118,7 +118,17 @@ class Settings(BaseSettings):
     os_hosts: str = Field(default="http://localhost:9200", description="OpenSearch主机地址", env="OS_HOSTS")
     os_username: str = Field(default="admin", description="OpenSearch用户名", env="OS_USERNAME")
     os_password: str = Field(default="admin", description="OpenSearch密码", env="OS_PASSWORD")
-    
+
+    # =============================================================================
+    # 图数据库配置
+    # =============================================================================
+    neo4j_uri: str = Field(default="neo4j://localhost:7687", description="图数据库URI", env="NEO4J_URI")
+    neo4j_user: str = Field(default="neo4j", description="图数据库用户名", env="NEO4J_USER")
+    neo4j_password: str = Field(default="neo4jneo4j", description="图数据库密码", env="NEO4J_PASSWORD")
+    neo4j_pool_size: int = Field(default=5, description="连接池大小", env="NEO4J_POOL_SIZE")
+    neo4j_max_overflow: int = Field(default=10, description="最大溢出连接数", env="NEO4J_MAX_OVERFLOW")
+
+
     # =============================================================================
     # 模型配置说明 见：app/config/xxx.json
     # =============================================================================

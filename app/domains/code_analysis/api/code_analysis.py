@@ -1,5 +1,6 @@
-from typing import Dict
-from fastapi import APIRouter,Body,HTTPException,Query,status
+from typing import Dict,List
+from fastapi import APIRouter,Body,HTTPException,status
+from app.domains.code_analysis.services.codegraph.graph_search import CodeGraphSearch
 from app.domains.code_analysis.services.repo_analysis_service import RepoAnalysisService
 
 
@@ -46,3 +47,33 @@ async def clear_repo_analysis_data(repo_id: str) -> Dict[str, object]:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail=str(e))
+
+
+@router.get("/{repo_id}/code-graph/dependents")
+async def get_file_dependents(repo_id: str, file_path: str) -> Dict[str, object]:
+    """查询依赖本文件的其他文件列表。"""
+    with CodeGraphSearch() as q:
+        res = await q.query_dependents_of_file(repo_id, file_path)
+    if not res.result:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail=res.message or "query dependents failed")
+    return res.content
+
+
+@router.get("/{repo_id}/code-graph/dependented")
+async def get_file_dependented(repo_id: str, file_path: str) -> Dict[str, object]:
+    """查询本文件依赖的其他文件列表。"""
+    with CodeGraphSearch() as q:
+        res = await q.query_dependented_of_file(repo_id, file_path)
+    if not res.result:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail=res.message or "query dependented failed")
+    return res.content
+
+
+@router.post("/{repo_id}/code-graph/file-summary")
+async def get_files_summary(repo_id: str, file_paths: List[str] = Body(...,embed=True)) -> Dict[str, object]:
+    """查询文件 summary（包含类/方法/顶层函数清单）。"""
+    with CodeGraphSearch() as q:
+        res = await q.query_file_summary(repo_id, file_paths)
+    if not res.result:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail=res.message or "query file summary failed")
+    return res.content

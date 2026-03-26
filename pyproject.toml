@@ -47,6 +47,7 @@ aiosqlite = ">=0.20.0,<0.22.0"
 aiomysql = "0.2.0"
 asyncpg = "0.30.0"
 sqlalchemy = "2.0.43"
+neo4j = ">=5.0.0,<6.0.0"
 alembic = "^1.18.0"
 
 # Redis缓存
