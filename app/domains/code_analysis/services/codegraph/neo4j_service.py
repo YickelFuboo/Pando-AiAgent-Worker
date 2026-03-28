@@ -3,13 +3,14 @@ import os
 from dataclasses import asdict
 from typing import Dict,List,Union,Optional
 from neo4j import GraphDatabase
+from app.utils.common import local_now_iso
 from ..codeast.model import FileInfo,FunctionInfo,ClassInfo,FolderInfo,CallInfo
 
 
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
-        
+
     def close(self):
         self.driver.close()
         
@@ -17,26 +18,27 @@ class Neo4jService:
         """创建或更新项目
         
         Args:
-            project_id: 项目全局唯一标识符
-            name: 项目名称
-            root_path: 项目根路径
+            repo_id: 仓库（项目）全局唯一标识符，与图谱中其他节点字段 repo_id 一致
+            repo_name: 项目名称
+            repo_local_path: 项目根路径
         """
         with self.driver.session() as session:
             try:
                 # 1. 创建或更新项目节点
                 session.run("""
-                    MERGE (p:Project {project_id: $project_id})
+                    MERGE (p:Project {repo_id: $repo_id})
                     SET p.name = $name,
-                    p.root_path = $root_path,
-                    p.updated_at = datetime()
+                        p.root_path = $root_path,
+                        p.updated_at = datetime($updated_at)
                     WITH p
                     WHERE p.created_at IS NULL
-                    SET p.created_at = datetime()
+                    SET p.created_at = datetime($updated_at)
                     RETURN p
                 """, {
                     'repo_id': repo_id,
                     'name': repo_name,
-                    'root_path': repo_local_path
+                    'root_path': repo_local_path,
+                    'updated_at': local_now_iso(),
                 })
             
             except Exception as e:
@@ -51,6 +53,9 @@ class Neo4jService:
         3. 子文件夹节点
         4. 子文件夹：文件夹=>(CONTAINS)=>子文件夹、子文件
         5. 文件节点每分析一个就会保存一个，避免积累，这里仅更新文件节点与文件夹的关系"""
+        if not folder_node:
+            return
+        
         with self.driver.session() as session:
             try:
                 # 1. 保存文件夹节点
@@ -61,14 +66,15 @@ class Neo4jService:
                         path: $path
                     })
                     SET folder.display_name = $name,
-                        folder.updated_at = datetime()
+                        folder.updated_at = datetime($updated_at)
                     WITH folder
                     WHERE folder.created_at IS NULL
-                    SET folder.created_at = datetime()
+                    SET folder.created_at = datetime($updated_at)
                 """, {
                     'repo_id': repo_id,
                     'name': folder_node.name,
-                    'path': folder_node.path
+                    'path': folder_node.path,
+                    'updated_at': local_now_iso(),
                 })
 
                 # 如果存在父文件夹节点，则创建parent_folder_node与folder_node的关系
@@ -116,7 +122,7 @@ class Neo4jService:
                 # 3. 保存文件节点及其内容
                 for file in folder_node.files:
                     # 文件每次分析完毕后先保存，这里补充重复保存
-                    #self.save_file_node(project_id, file)
+                    self.save_file_node(repo_id, file)
                     self._update_folder_contains_file(repo_id, folder_node, file)
                 
             except Exception as e:
@@ -168,17 +174,18 @@ class Neo4jService:
                     SET f.language = $language,
                         f.imports = $imports,
                         f.display_name = $name,
-                        f.updated_at = datetime()
+                        f.updated_at = datetime($updated_at)
                     WITH f
                     WHERE f.created_at IS NULL
-                    SET f.created_at = datetime()
+                    SET f.created_at = datetime($updated_at)
                     RETURN f
                 """, {
                     'repo_id': repo_id,
                     'name': file_node.name,
                     'file_path': file_node.file_path,
                     'language': file_node.language,
-                    'imports': file_node.imports
+                    'imports': file_node.imports,
+                    'updated_at': local_now_iso(),
                 })
 
                 # 2. 保存文件中的类和函数节点            
@@ -220,14 +227,15 @@ class Neo4jService:
                         c.source_code = $source_code,
                         c.attributes = $attributes,
                         c.display_name = $name,
-                        c.updated_at = datetime()
+                        c.updated_at = datetime($updated_at)
                     WITH c
                     WHERE c.created_at IS NULL
-                    SET c.created_at = datetime()
+                    SET c.created_at = datetime($updated_at)
                     RETURN c
                 """, {
                     'repo_id': repo_id,
                     'file_path': file_node.file_path,
+                    'updated_at': local_now_iso(),
                     **class_data
                 })
                 
@@ -285,8 +293,8 @@ class Neo4jService:
                     ON CREATE SET 
                         base_class.node_type = base.node_type,
                         base_class.display_name = base.name,
-                        base_class.created_at = datetime()
-                    SET base_class.updated_at = datetime()
+                        base_class.created_at = datetime($updated_at)
+                    SET base_class.updated_at = datetime($updated_at)
                     
                     WITH c, base_class, base_class.node_type = 'interface' as is_interface
                     FOREACH (x IN CASE WHEN is_interface THEN [1] ELSE [] END |
@@ -299,7 +307,8 @@ class Neo4jService:
                     'repo_id': repo_id,
                     'name': class_node.name,
                     'full_name': class_node.full_name,
-                    'base_classes': asdict(class_node)['base_classes']
+                    'base_classes': asdict(class_node)['base_classes'],
+                    'updated_at': local_now_iso(),
                 })
                 
             except Exception as e:
@@ -341,15 +350,16 @@ class Neo4jService:
                         f.return_types = $return_types,
                         f.class_name = $class_name,
                         f.display_name = $name,
-                        f.updated_at = datetime()
+                        f.updated_at = datetime($updated_at)
                     WITH f
                     WHERE f.created_at IS NULL
-                    SET f.created_at = datetime()
+                    SET f.created_at = datetime($updated_at)
                 """, {
                     'repo_id': repo_id,
                     'file_path': file_node.file_path,
                     'class_name': '',
                     'parent_type': 'File',
+                    'updated_at': local_now_iso(),
                     **function_data
                 })
                     
@@ -415,15 +425,16 @@ class Neo4jService:
                         f.return_types = $return_types,
                         f.class_name = $class_name,
                         f.display_name = $name,
-                        f.updated_at = datetime()
+                        f.updated_at = datetime($updated_at)
                     WITH f
                     WHERE f.created_at IS NULL
-                    SET f.created_at = datetime()
+                    SET f.created_at = datetime($updated_at)
                 """, {
                     'repo_id': repo_id,
                     'file_path': class_node.file_path,
                     'class_name': class_node.name, 
                     'parent_type': 'Class',
+                    'updated_at': local_now_iso(),
                     **function_data
                 })
                     
@@ -478,8 +489,8 @@ class Neo4jService:
                     })
                     ON CREATE SET
                         callee.node_type = 'api',
-                        callee.created_at = datetime()
-                    SET callee.updated_at = datetime()
+                        callee.created_at = datetime($updated_at)
+                    SET callee.updated_at = datetime($updated_at)
                     
                     
                     // 创建调用关系
@@ -492,7 +503,8 @@ class Neo4jService:
                     'caller_signature': function_node.signature,
                     'callee_name': call_info.name,
                     'callee_full_name': call_info.full_name,
-                    'callee_signature': call_info.signature
+                    'callee_signature': call_info.signature,
+                    'updated_at': local_now_iso(),
                 })
 
             except Exception as e:
@@ -595,6 +607,26 @@ class Neo4jService:
                     logging.error(f"Error type: {type(e)}")
                     raise e
 
+    def delete_repo_nodes(self, repo_id: str):
+        """删除指定 repo_id 的全部图谱数据（包含 Project/Folder/File/Class/Function 等节点及其关系）。"""
+        with self.driver.session() as session:
+            with session.begin_transaction() as tx:
+                try:
+                    tx.run(
+                        """
+                        MATCH (n)
+                        WHERE n.repo_id = $repo_id
+                        DETACH DELETE n
+                        """,
+                        {"repo_id": repo_id},
+                    )
+                    tx.commit()
+                except Exception as e:
+                    tx.rollback()
+                    logging.error("Error in delete_repo_nodes: %s, repo_id: %s", e, repo_id)
+                    logging.error("Error type: %s", type(e))
+                    raise
+
     def query_file_summary(self, repo_id: str, file_paths: List[str]) -> Dict:
         """查询文件内容概述"""
         with self.driver.session() as session:
@@ -611,7 +643,7 @@ class Neo4jService:
                      collect({
                          name: method.name,
                          signature: method.signature,
-                         type: method.type
+                         type: method.`type`
                      }) as methods
                 
                 // 3. 收集类信息
@@ -636,7 +668,7 @@ class Neo4jService:
                        collect({
                            name: func.name,
                            signature: func.signature,
-                           type: func.type
+                           type: func.`type`
                        }) as functions
                 ORDER BY file.file_path
             """, {

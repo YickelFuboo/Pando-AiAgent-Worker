@@ -1,8 +1,9 @@
+import logging
 import os
 import re
-import logging
-from tree_sitter import Parser, Language
-from typing import Optional, List
+from typing import List, Optional
+from tree_sitter import Language, Parser
+from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
 
@@ -92,7 +93,7 @@ class GoAnalyzer(LanguageAnalyzer):
             
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
                 language=Lang.GO,
                 functions=functions,
                 classes=structs,
@@ -183,7 +184,7 @@ class GoAnalyzer(LanguageAnalyzer):
             full_name=full_name,
             signature=self._get_function_signature(node, content),
             type=FunctionType.FUNCTION.value,
-            file_path=os.path.relpath(self.file_path, self.base_path),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             source_code=source_code,
             start_line=node.start_point[0],
             end_line=node.end_point[0],
@@ -214,7 +215,7 @@ class GoAnalyzer(LanguageAnalyzer):
             full_name=full_name,
             signature=self._get_function_signature(node, content),
             type=FunctionType.METHOD.value,
-            file_path=os.path.relpath(self.file_path, self.base_path),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             source_code=source_code,
             start_line=node.start_point[0],
             end_line=node.end_point[0],
@@ -265,7 +266,7 @@ class GoAnalyzer(LanguageAnalyzer):
         full_name = f"{package_name}.{struct_name}" if package_name else struct_name
         
         return ClassInfo(
-            file_path=os.path.relpath(self.file_path, self.base_path),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             name=struct_name,
             full_name=full_name,
             node_type=node_type.value,
@@ -491,7 +492,7 @@ class GoAnalyzer(LanguageAnalyzer):
                 full_name=method_name,  # 接口方法不需要包名前缀
                 signature=self._get_function_signature(method_elem, content),
                 type=FunctionType.METHOD.value,
-                file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
                 source_code=source_code,
                 start_line=method_elem.start_point[0],
                 end_line=method_elem.end_point[0],

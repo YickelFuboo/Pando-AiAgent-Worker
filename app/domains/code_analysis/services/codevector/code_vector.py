@@ -10,6 +10,7 @@ from app.domains.code_analysis.services.codesummary.code_summary import CodeSumm
 from app.domains.code_analysis.services.codesummary.model import ContentType
 from app.infrastructure.llms import embedding_factory
 from app.infrastructure.vector_store import VECTOR_STORE_CONN
+from app.utils.common import normalize_path
 
 
 _TRIVIAL_SYM_NAME = re.compile(r"^(get|set)[A-Z_][A-Za-z0-9_]*$")
@@ -26,6 +27,7 @@ class CodeVectorService:
     @staticmethod
     async def vectorize_and_store_line_chunks(repo_id: str, rel_file_path: str, chunks: List[LineTextChunk]) -> None:
         """将行切片文本批量嵌入向量，按仓与文件路径幂等写入向量库（先删后插）。"""
+        rel_file_path = normalize_path(rel_file_path)
         if not chunks:
             return
         texts = [c.text for c in chunks]
@@ -79,6 +81,7 @@ class CodeVectorService:
         file_info: Optional[FileInfo],
     ) -> None:
         """基于 AST 文件信息抽取函数/类/方法，经 LLM 摘要后嵌入并写入符号摘要向量空间。"""
+        rel_file_path = normalize_path(rel_file_path)
         if not file_info:
             return
         
@@ -316,6 +319,7 @@ class CodeVectorService:
     @staticmethod
     async def delete_file_vector_records(repo_id: str, rel_file_path: str) -> int:
         """按 repo_id + file_path 删除指定文件的向量记录。"""
+        rel_file_path = normalize_path(rel_file_path)
         model = embedding_factory.create_model()
         if not model:
             return 0

@@ -1,6 +1,7 @@
 import os
-from typing import List,Dict
+from typing import Dict, List
 from app.config.settings import settings
+from app.utils.common import normalize_path
 from .model import QueryResponse
 from .neo4j_service import Neo4jService
 
@@ -25,7 +26,7 @@ class CodeGraphSearch:
     async def query_dependents_of_file(self, repo_id: str, file_path: str) -> QueryResponse:
         """查询依赖本文件的其他文件列表。"""
         try:
-            normalized_file_path = os.path.normpath(file_path)
+            normalized_file_path = normalize_path(os.path.normpath(file_path))
             dependents: List[str] = self.db_client.query_dependents_of_file(repo_id, normalized_file_path)
             return QueryResponse(
                 result=True,
@@ -41,7 +42,7 @@ class CodeGraphSearch:
     async def query_dependented_of_file(self, repo_id: str, file_path: str) -> QueryResponse:
         """查询本文件被依赖（即本文件依赖的其他文件列表）。"""
         try:
-            normalized_file_path = os.path.normpath(file_path)
+            normalized_file_path = normalize_path(os.path.normpath(file_path))
             dependented: List[str] = self.db_client.query_dependented_of_file(repo_id, normalized_file_path)
             return QueryResponse(
                 result=True,
@@ -57,7 +58,7 @@ class CodeGraphSearch:
     async def query_file_summary(self, repo_id: str, file_paths: List[str]) -> QueryResponse:
         """查询文件内容概述（包含类/方法/顶层函数清单）。"""
         try:
-            normalized_paths = [os.path.normpath(p) for p in file_paths]
+            normalized_paths = [normalize_path(os.path.normpath(p)) for p in file_paths]
             records = self.db_client.query_file_summary(repo_id, normalized_paths)
 
             files_summary: Dict[str, object] = {}
@@ -65,12 +66,10 @@ class CodeGraphSearch:
                 files_summary[record["path"]] = {
                     "name": record["name"],
                     "language": record["language"],
-                    "summary": record["summary"],
                     "classes": [
                         {
                             "name": cls["name"],
                             "full_name": cls["full_name"],
-                            "summary": cls["summary"],
                             "methods": [m for m in cls["methods"] if m.get("name") is not None],
                         }
                         for cls in (record.get("classes") or [])

@@ -1,8 +1,8 @@
-import os
-from typing import List, Optional
-from enum import Enum
 import json
-from typing import Dict
+import os
+from enum import Enum
+from typing import Dict, List, Optional
+from app.utils.common import normalize_path
 
 class PathInfo:
     def __init__(self, path: str = "", name: str = "", is_directory: bool = False, size: int = 0):
@@ -52,7 +52,7 @@ class FileTreeService:
                 continue
             
             # 分割路径
-            parts = [part for part in relative_path.replace('\\', '/').split('/') if part]
+            parts = [part for part in normalize_path(relative_path).split("/") if part]
             
             # 从根节点开始构建路径
             current_node = root

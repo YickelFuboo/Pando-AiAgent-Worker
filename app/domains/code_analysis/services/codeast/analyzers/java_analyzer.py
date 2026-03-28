@@ -1,7 +1,8 @@
-import os
-import javalang
 import logging
-from typing import Optional, List
+import os
+from typing import List, Optional
+import javalang
+from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
 
@@ -32,7 +33,7 @@ class JavaAnalyzer(LanguageAnalyzer):
             
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
                 language=Lang.JAVA,
                 functions=functions,
                 classes=classes,
@@ -92,7 +93,7 @@ class JavaAnalyzer(LanguageAnalyzer):
         full_name = f"{package_name}.{node.name}" if package_name else node.name
         
         return ClassInfo(
-            file_path=os.path.relpath(self.file_path, self.base_path),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             name=node.name,
             full_name=full_name,
             node_type=ClassType.CLASS.value,
@@ -145,7 +146,7 @@ class JavaAnalyzer(LanguageAnalyzer):
             full_name=full_name,
             signature=signature,
             type=FunctionType.METHOD.value,
-            file_path=os.path.relpath(self.file_path, self.base_path),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             source_code=source_code,
             start_line=start_line + 1,
             end_line=end_line,

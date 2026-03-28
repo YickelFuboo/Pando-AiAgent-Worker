@@ -1,7 +1,8 @@
-import os
 import ast
 import logging
-from typing import Optional, List
+import os
+from typing import List, Optional
+from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, CallInfo, ClassType, FunctionType, Language as Lang
 
@@ -46,7 +47,7 @@ class PythonAnalyzer(LanguageAnalyzer):
             # 创建文件节点，统一使用正斜杠
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
                 language=Lang.PYTHON,
                 functions=functions,
                 classes=classes,
@@ -154,7 +155,7 @@ class PythonAnalyzer(LanguageAnalyzer):
             full_name=full_name,  # 包含完整路径的函数名
             signature=signature,  # 只包含函数签名信息
             type=FunctionType.FUNCTION.value,
-            file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             source_code=source_code,
             start_line=node.lineno,
             end_line=node.end_lineno,
@@ -381,7 +382,7 @@ class PythonAnalyzer(LanguageAnalyzer):
                         attributes.append(target.id)
         
         class_info = ClassInfo(
-            file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             name=node.name,
             full_name=full_name,
             node_type=node_type.value,
@@ -422,7 +423,7 @@ class PythonAnalyzer(LanguageAnalyzer):
                 base_name = base_full_name.split('.')[-1]
                 
                 base_classes.append(ClassInfo(
-                    file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+                    file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
                     name=base_name,
                     full_name=base_full_name,
                     node_type=ClassType.CLASS.value
@@ -444,7 +445,7 @@ class PythonAnalyzer(LanguageAnalyzer):
                 base_name = base_full_name.split('.')[-1]
                 
                 base_classes.append(ClassInfo(
-                    file_path=os.path.relpath(self.file_path, self.base_path).replace('\\', '/'),
+                    file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
                     name=base_name,
                     full_name=base_full_name,
                     node_type=ClassType.CLASS.value

@@ -2,7 +2,7 @@ import os
 from typing import Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from app.utils.common import get_project_meta
+from app.utils.common import get_project_meta, normalize_path
 
 
 # 定义全局配置常量
@@ -190,7 +190,7 @@ class Settings(BaseSettings):
             parent_dir = os.path.dirname(abs_path)
             if parent_dir and not os.path.isdir(parent_dir):
                 os.makedirs(parent_dir, exist_ok=True)
-            norm_path = abs_path.replace("\\", "/")
+            norm_path = normalize_path(abs_path)
             return f"sqlite+aiosqlite:///{norm_path}"
     
     @property

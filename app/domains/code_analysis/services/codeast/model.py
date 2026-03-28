@@ -1,14 +1,10 @@
 from dataclasses import dataclass
-from typing import Optional, List
 from enum import Enum
+from typing import Optional, List
 
 """
 定义通过语法数据对Repo内容解析后，生成的数据结构，用于最终形成知识图谱的节点和边
 """
-
-def _normalize_path(self, path: str) -> str:
-    """规范化路径，统一使用正斜杠"""
-    return path.replace('\\', '/')
 
 # 知识图谱关系方案
 #ProjectNode =(CONTAINS)->FolderNode
@@ -162,6 +158,7 @@ class FileInfo:
 class FolderInfo:
     """文件夹节点"""
     # Key fields
+    name: str
     path: str
     
     # Non-key fields

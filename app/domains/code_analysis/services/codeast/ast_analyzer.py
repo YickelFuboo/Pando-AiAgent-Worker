@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import traceback
+from app.utils.common import normalize_path
 from .analyzers.python_analyzer import PythonAnalyzer
 from .analyzers.java_analyzer import JavaAnalyzer
 from .analyzers.go_analyzer import GoAnalyzer
@@ -14,23 +15,6 @@ from .model import FileInfo, FolderInfo, Language
 # 导入其他语言的分析器...
 
 class FileAstAnalyzer:
-    # 定义需要排除的文件夹
-    EXCLUDED_DIRS = {
-        '__pycache__',
-        '.git',
-        '.idea',
-        '.vscode',
-        'venv',
-        'node_modules',
-        'dist',
-        'build',
-        'target',
-        '.pytest_cache',
-        '.mypy_cache',
-        '.coverage',
-        '__tests__',
-        'tests'
-    }
 
     def __init__(self, base_path: str, file_path: str):
         """初始化代码图谱生成器"""
@@ -83,6 +67,24 @@ class FileAstAnalyzer:
             return None
     
 class FolderAstAnalyzer:
+    # 定义需要排除的文件夹
+    EXCLUDED_DIRS = {
+        '__pycache__',
+        '.git',
+        '.idea',
+        '.vscode',
+        'venv',
+        'node_modules',
+        'dist',
+        'build',
+        'target',
+        '.pytest_cache',
+        '.mypy_cache',
+        '.coverage',
+        '__tests__',
+        'tests'
+    }
+
     def __init__(self, base_path: str, folder_path: str):
         """初始化文件夹分析器"""
         self.base_path = base_path
@@ -101,16 +103,15 @@ class FolderAstAnalyzer:
             folder_path = self.folder_path
 
         files = []
-        subfolders = []
-        
-        try:
-            for item in os.listdir(folder_path):
-                # 跳过隐藏文件和特殊目录
-                if item.startswith('.') or item in self.EXCLUDED_DIRS:
-                    continue
-                # 拼接绝对路径
-                item_path = os.path.join(folder_path, item)
+        subfolders = []        
+        for item in os.listdir(folder_path):
+            # 跳过隐藏文件和特殊目录
+            if item.startswith('.') or item in self.EXCLUDED_DIRS:
+                continue
+            # 拼接绝对路径
+            item_path = os.path.join(folder_path, item)
 
+            try:
                 if os.path.isfile(item_path) and item_path.endswith(('.py', '.java', '.go', '.cpp', '.c')) and not item_path.startswith('__'):
                     # 分析所有支持的文件类型
                     file_ast_analyzer = FileAstAnalyzer(self.base_path, item_path)
@@ -121,18 +122,16 @@ class FolderAstAnalyzer:
                     subfolder_info = await self.analyze_folder(item_path, is_subfolder=True)
                     if subfolder_info:
                         subfolders.append(subfolder_info)
+            except Exception as e: # 只记录错误，不抛出异常
+                logging.error(f"Error in analyze_folder: {str(e)}, item_path: {item_path}")
+                continue
 
-            return FolderInfo(
-                name=os.path.basename(folder_path.rstrip(os.sep)),
-                path=os.path.relpath(folder_path, self.base_path),
-                files=files,
-                subfolders=subfolders
-            )
+        return FolderInfo(
+            name=os.path.basename(folder_path.rstrip(os.sep)),
+            path=normalize_path(os.path.relpath(folder_path, self.base_path)),
+            files=files,
+            subfolders=subfolders
+        )
             
-        except Exception as e:
-            logging.error(f"Error in analyze_folder: {str(e)}, folder_path: {folder_path}")
-            logging.error(f"Error type: {type(e)}")
-            logging.error(f"Stack trace: ", traceback.format_exc())
-            return None
         
 

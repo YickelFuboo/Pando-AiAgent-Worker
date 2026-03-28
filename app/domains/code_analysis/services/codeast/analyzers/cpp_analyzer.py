@@ -1,9 +1,10 @@
-import re
-import os
 import logging
-from typing import Optional, List
+import os
+import re
+from typing import List, Optional
 import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
+from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
 
@@ -69,7 +70,7 @@ class CppAnalyzer(LanguageAnalyzer):
             
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=os.path.relpath(self.file_path, self.base_path),
+                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
                 language=Lang.CPP,
                 functions=functions,
                 classes=classes,
@@ -110,7 +111,7 @@ class CppAnalyzer(LanguageAnalyzer):
             full_name=full_name,
             signature=signature,
             type=FunctionType.FUNCTION.value,
-            file_path=os.path.relpath(self.file_path, self.base_path),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             source_code=source_code,
             start_line=node.start_point[0] + 1,
             end_line=node.end_point[0] + 1,
@@ -133,7 +134,7 @@ class CppAnalyzer(LanguageAnalyzer):
         return ClassInfo(
             name=class_name,
             full_name=full_name,
-            file_path=os.path.relpath(self.file_path, self.base_path),
+            file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
             node_type=ClassType.CLASS.value,
             source_code=source_code,
             start_line=node.start_point[0],

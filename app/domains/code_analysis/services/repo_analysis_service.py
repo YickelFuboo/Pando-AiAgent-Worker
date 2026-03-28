@@ -7,9 +7,11 @@ from sqlalchemy import delete,func,or_,select,update
 from sqlalchemy.exc import IntegrityError
 from app.domains.code_analysis.models.analysis_status import FileAnalysisStatus,RepoAnalysisStatus,RepoAnalysisTask,RepoFileAnalysisState
 from app.domains.code_analysis.models.git_repo_mgmt import GitRepository
+from app.domains.code_analysis.services.codegraph.graph_creator import CodeGraphGenerator
 from app.domains.code_analysis.services.file_analysis_service import FileAnalysisService
 from app.domains.code_analysis.services.codevector.code_vector import CodeVectorService
 from app.infrastructure.database import get_db_session
+from app.utils.common import normalize_path
 
 
 class RepoScanCancelled(Exception):
@@ -20,6 +22,7 @@ class RepoAnalysisService:
     """统一编排服务：扫描仓库并驱动文件级分析消费。"""
 
     _running_scan_tasks: Dict[str, asyncio.Task] = {}
+    _running_graph_tasks: Dict[str, asyncio.Task] = {}
     CODE_EXTENSIONS = {".py", ".java", ".go", ".cpp", ".c"}
     EXCLUDED_DIRS = {"__pycache__", ".git", ".idea", ".vscode", "venv", "node_modules", "dist", "build", "target", ".pytest_cache", ".mypy_cache", ".coverage", "__tests__", "tests"}
 
@@ -93,6 +96,7 @@ class RepoAnalysisService:
                 "scan_status": RepoAnalysisStatus.RUNNING.value,
                 "target_rel_path": normalized_target_rel_path,
                 "is_directory": is_directory,
+                "info": "scan is running",
             }
 
         # 启动扫描任务
@@ -105,12 +109,30 @@ class RepoAnalysisService:
             )
         )
         RepoAnalysisService._running_scan_tasks[repo_id] = scanning_task
+
+        # 同步启动代码图谱生成（后台任务，不阻塞扫描启动返回）
+        existing_graph_task = RepoAnalysisService._running_graph_tasks.get(repo_id)
+        if not existing_graph_task or existing_graph_task.done():
+            async def _run_graph() -> None:
+                try:
+                    generator = CodeGraphGenerator(
+                        repo_id=repo_id,
+                        repo_name=str(repo_id),
+                        repo_local_path=repo_path or "",
+                    )
+                    await generator.generate_graph(clean_stale=True)
+                except Exception as e:
+                    logging.warning("代码图谱生成失败 repo_id=%s error=%s", repo_id, e)
+
+            RepoAnalysisService._running_graph_tasks[repo_id] = asyncio.create_task(_run_graph())
+
         return {
             "repo_id": repo_id,
             "repo_path": repo_path,
             "scan_status": RepoAnalysisStatus.RUNNING.value,
             "target_rel_path": normalized_target_rel_path,
             "is_directory": is_directory,
+            "info": "scan is running",
         } 
 
     @staticmethod
@@ -177,6 +199,9 @@ class RepoAnalysisService:
         try:
             async with get_db_session() as db:
                 await RepoAnalysisService._assert_scan_is_running(db, repo_id)
+            
+            if target_rel_path is not None:
+                target_rel_path = normalize_path(target_rel_path.strip())
             
             if target_rel_path is not None and not is_directory:
                 scanned_count = 0
@@ -252,7 +277,7 @@ class RepoAnalysisService:
                     # 过滤排除目录
                     if d in RepoAnalysisService.EXCLUDED_DIRS or d.startswith("."):
                         sub_abs = os.path.join(parent_root, d)
-                        rel_sub = os.path.relpath(sub_abs, repo_root).replace("\\", "/")
+                        rel_sub = normalize_path(os.path.relpath(sub_abs, repo_root))
                         if rel_sub != ".":
                             excluded_dirs.add(rel_sub)
                     else:
@@ -263,7 +288,7 @@ class RepoAnalysisService:
                 direct_file_paths: Set[str] = set()
                 for filename in files:
                     abs_path = os.path.join(parent_root, filename)
-                    rel_path = os.path.relpath(abs_path, repo_root).replace("\\", "/")
+                    rel_path = normalize_path(os.path.relpath(abs_path, repo_root))
                     ok = await RepoAnalysisService.update_file_state(db, repo_id, abs_path, rel_path)
                     if not ok:
                         continue
@@ -392,7 +417,7 @@ class RepoAnalysisService:
             current_root: 当前根目录。
             existing_files: 现有文件集合。
         """
-        rel_dir = os.path.relpath(cur_dir, repo_root).replace("\\", "/")
+        rel_dir = normalize_path(os.path.relpath(cur_dir, repo_root))
         if rel_dir == ".":
             rel_dir = ""
         
@@ -506,7 +531,7 @@ class RepoAnalysisService:
         if not raw:
             raise ValueError("target_rel_path 不能为空")
         
-        normalized_slash = raw.replace("\\", "/")
+        normalized_slash = normalize_path(raw)
         dir_hint = normalized_slash.endswith("/")
         norm = normalized_slash.strip("/")
         if not norm:
@@ -633,3 +658,15 @@ class RepoAnalysisService:
             await CodeVectorService.delete_repo_vector_records(repo_id)
         except Exception as e:
             logging.warning("删除 repo 向量数据失败 repo_id=%s error=%s", repo_id, e)
+
+        # 删除 codegraph 中该 repo 的全部数据
+        try:
+            generator = CodeGraphGenerator(repo_id,"","")
+            await generator.delete_repo_graph()
+        except Exception as e:
+            logging.warning("删除 repo codegraph 数据失败 repo_id=%s error=%s", repo_id, e)
+        finally:
+            try:
+                generator.close()
+            except Exception:
+                pass

@@ -8,8 +8,10 @@ from app.domains.code_analysis.models.analysis_status import FileAnalysisStatus,
 from app.domains.code_analysis.models.git_repo_mgmt import GitRepository
 from app.domains.code_analysis.services.codeast.ast_analyzer import FileAstAnalyzer
 from app.domains.code_analysis.services.codechunk.code_chunk import CodeChunkService
+from app.domains.code_analysis.services.codegraph.graph_creator import CodeGraphGenerator
 from app.domains.code_analysis.services.codevector.code_vector import CodeVectorService
 from app.infrastructure.database import get_db_session
+from app.utils.common import normalize_path
 
 
 class FileAnalysisService:
@@ -330,7 +332,7 @@ class FileAnalysisService:
         rel_file_path: str,
         force: bool = False,
     ) -> Dict[str, object]:
-        normalized_file_path = rel_file_path.replace("\\", "/").strip("/")
+        normalized_file_path = normalize_path(rel_file_path).strip("/")
         async with get_db_session() as db:
             record = await db.scalar(
                 select(RepoFileAnalysisState).where(
@@ -355,6 +357,18 @@ class FileAnalysisService:
             repo_id=repo_id,
             rel_file_path=normalized_file_path,
         )
+
+        # 删除 codegraph 中该文件对应数据
+        try:
+            generator = CodeGraphGenerator(repo_id,"","")
+            await generator.delete_file_graph(normalized_file_path)
+        except Exception as e:
+            logging.warning("删除文件 codegraph 数据失败 repo_id=%s file_path=%s error=%s", repo_id, normalized_file_path, e)
+        finally:
+            try:
+                generator.close()
+            except Exception:
+                pass
 
         return {
             "repo_id": repo_id,

@@ -1,12 +1,10 @@
-import os
-from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
-from datetime import datetime
-import traceback
 import logging
-from ..codeast.ast_analyzer import FolderAstAnalyzer, FileAstAnalyzer
-from .neo4j_service import Neo4jService
+import os
+from typing import List
 from app.config.settings import settings
+from app.utils.common import local_now_iso, normalize_path
+from ..codeast.ast_analyzer import FileAstAnalyzer,FolderAstAnalyzer
+from .neo4j_service import Neo4jService
 
 
 class CodeGraphGenerator:
@@ -22,9 +20,19 @@ class CodeGraphGenerator:
             settings.neo4j_password
         )
 
+    def close(self) -> None:
+        if self.db_client:
+            self.db_client.close()
+
+    async def delete_repo_graph(self) -> None:
+        self.db_client.delete_repo_nodes(self.repo_id)
+
+    async def delete_file_graph(self, rel_file_path: str) -> None:
+        self.db_client.delete_file_nodes(self.repo_id, normalize_path(rel_file_path))
+
     async def generate_graph(self, clean_stale: bool = False):
         """生成或更新完整的代码知识图谱"""
-        start_time = datetime.now().isoformat()
+        start_time = local_now_iso()
 
         # 创建或更新项目节点
         self.db_client.save_project(
@@ -62,7 +70,7 @@ class CodeGraphGenerator:
                 continue
             
             # 转换为相对路径（与保存时一致）
-            rel_path = os.path.relpath(file_path, self.repo_local_path)
+            rel_path = normalize_path(os.path.relpath(file_path, self.repo_local_path))
             
             try:
                 # 1. 删除文件相关的所有节点
@@ -96,7 +104,7 @@ class CodeGraphGenerator:
                 continue
             
             # 转换为相对路径（与保存时一致）
-            rel_path = os.path.relpath(folder_path, self.repo_local_path)
+            rel_path = normalize_path(os.path.relpath(folder_path, self.repo_local_path))
             
             try:
                 # 1. 删除文件夹相关的所有节点

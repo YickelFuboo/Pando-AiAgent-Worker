@@ -1,7 +1,8 @@
+import logging
 import os
 import re
-import logging
 from typing import List, Optional
+from app.utils.common import normalize_path
 from .file_tree_service import FileTreeService, PathInfo
 
 
@@ -31,7 +32,7 @@ class LocalRepoService:
         
         lines: List[str] = []
         for info in info_list:
-            relative_path = os.path.relpath(info.path, path)
+            relative_path = normalize_path(os.path.relpath(info.path, path))
             if relative_path.startswith("."):
                 continue
             lines.append(relative_path)

@@ -1,7 +1,18 @@
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 import tomllib
+
+
+def local_now_iso() -> str:
+    return datetime.now().isoformat()
+
+
+def normalize_path(path: str) -> str:
+    """规范化路径，统一使用正斜杠"""
+    return path.replace("\\", "/")
+
 
 def get_project_meta(package_name: str = "knowledge-service"):
     """从 pyproject.toml 读取项目元数据"""
