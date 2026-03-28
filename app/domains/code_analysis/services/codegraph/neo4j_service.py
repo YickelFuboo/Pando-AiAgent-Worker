@@ -679,55 +679,103 @@ class Neo4jService:
             return list(result)
 
     def query_dependents_of_file(self, repo_id: str, file_path: str) -> List[str]:
-        """查询依赖本文件的其他文件列表（CALLS + 继承/实现）。"""
+        """谁在用本文件里的代码：返回其它源文件路径列表（已去重）。
+
+        file_path 须与图中该文件的相对路径一致，由调用方传入前规范化。
+
+        函数之间的 CALLS（调用方在其它文件、被调方在本文件）在「顶层函数 / 类成员方法」组合上应涵盖齐下面 4 种
+        （实现上不单独写四种 MATCH，而是用本文件内 callee 的图结构 + file_path 约束统一覆盖）：
+        1. 其它文件顶层函数 → 本文件顶层函数
+        2. 其它文件类成员方法 → 本文件顶层函数
+        3. 其它文件顶层函数 → 本文件类成员方法
+        4. 其它文件类成员方法 → 本文件类成员方法
+
+        此外仍支持：被调函数节点仅带 file_path、与 File/Class 的 CONTAINS 链不一致时的 CALLS 兜底；以及
+        其它文件的类通过 INHERITS|IMPLEMENTS 依赖本文件中的类（非函数调用，一并计入返回路径）。
+        """
+        params = {"repo_id": repo_id, "file_path": file_path}
         with self.driver.session() as session:
             result = session.run(
                 """
-                MATCH (target:File {repo_id: $repo_id,file_path: $file_path})
-                MATCH (target)-[:CONTAINS]->(fn:Function)
-                MATCH (caller:Function)-[:CALLS]->(fn)
-                WHERE caller.file_path IS NOT NULL AND caller.file_path <> $file_path
+                MATCH (target:File {repo_id: $repo_id, file_path: $file_path})
+                MATCH (target)-[:CONTAINS]->(callee:Function)
+                MATCH (caller:Function)-[:CALLS]->(callee)
+                WHERE caller.repo_id = $repo_id
+                  AND caller.file_path IS NOT NULL AND caller.file_path <> $file_path
                 RETURN DISTINCT caller.file_path AS other_file
                 UNION
-                MATCH (target:File {repo_id: $repo_id,file_path: $file_path})
-                MATCH (target)-[:CONTAINS]->(cl:Class)-[:CONTAINS]->(m:Function)
-                MATCH (caller:Function)-[:CALLS]->(m)
-                WHERE caller.file_path IS NOT NULL AND caller.file_path <> $file_path
+                MATCH (target:File {repo_id: $repo_id, file_path: $file_path})
+                MATCH (target)-[:CONTAINS]->(:Class)-[:CONTAINS]->(callee:Function)
+                MATCH (caller:Function)-[:CALLS]->(callee)
+                WHERE caller.repo_id = $repo_id
+                  AND caller.file_path IS NOT NULL AND caller.file_path <> $file_path
                 RETURN DISTINCT caller.file_path AS other_file
                 UNION
-                MATCH (target:File {repo_id: $repo_id,file_path: $file_path})
+                MATCH (caller:Function)-[:CALLS]->(callee:Function)
+                WHERE caller.repo_id = $repo_id AND callee.repo_id = $repo_id
+                  AND callee.file_path = $file_path
+                  AND caller.file_path IS NOT NULL AND caller.file_path <> $file_path
+                RETURN DISTINCT caller.file_path AS other_file
+                UNION
+                MATCH (target:File {repo_id: $repo_id, file_path: $file_path})
                 MATCH (target)-[:CONTAINS]->(base:Class)
                 MATCH (sub:Class)-[:INHERITS|IMPLEMENTS]->(base)
-                WHERE sub.file_path IS NOT NULL AND sub.file_path <> $file_path
+                WHERE sub.repo_id = $repo_id
+                  AND sub.file_path IS NOT NULL AND sub.file_path <> $file_path
                 RETURN DISTINCT sub.file_path AS other_file
                 """,
-                {"repo_id": repo_id,"file_path": file_path},
+                params,
             )
-            return [record["other_file"] for record in result if record and record.get("other_file")]
+            out = [record["other_file"] for record in result if record and record.get("other_file")]
+            return list(dict.fromkeys(out))
 
     def query_dependented_of_file(self, repo_id: str, file_path: str) -> List[str]:
-        """查询本文件依赖的其他文件列表（CALLS + 继承/实现）。"""
+        """本文件在用谁：返回本文件所依赖的其它源文件路径列表（已去重）。
+
+        file_path 须与图中该文件的相对路径一致，由调用方传入前规范化。
+
+        函数之间的 CALLS（调用方在本文件、被调方在其它文件）在「顶层函数 / 类成员方法」组合上应涵盖齐下面 4 种
+        （实现上不单独写四种 MATCH，而是用本文件内 caller 的图结构 + file_path 约束统一覆盖）：
+        1. 本文件顶层函数 → 其它文件顶层函数
+        2. 本文件顶层函数 → 其它文件类成员方法
+        3. 本文件类成员方法 → 其它文件顶层函数
+        4. 本文件类成员方法 → 其它文件类成员方法
+
+        此外仍支持：调用方函数仅带 file_path、与 File/Class 的 CONTAINS 链不一致时的 CALLS 兜底；以及
+        本文件中的类通过 INHERITS|IMPLEMENTS 依赖其它文件中的类（非函数调用，一并计入返回路径）。
+        """
+        params = {"repo_id": repo_id, "file_path": file_path}
         with self.driver.session() as session:
             result = session.run(
                 """
-                MATCH (target:File {repo_id: $repo_id,file_path: $file_path})
-                MATCH (target)-[:CONTAINS]->(fn:Function)
-                MATCH (fn)-[:CALLS]->(callee:Function)
-                WHERE callee.file_path IS NOT NULL AND callee.file_path <> $file_path
+                MATCH (target:File {repo_id: $repo_id, file_path: $file_path})
+                MATCH (target)-[:CONTAINS]->(caller:Function)
+                MATCH (caller)-[:CALLS]->(callee:Function)
+                WHERE callee.repo_id = $repo_id
+                  AND callee.file_path IS NOT NULL AND callee.file_path <> $file_path
                 RETURN DISTINCT callee.file_path AS other_file
                 UNION
-                MATCH (target:File {repo_id: $repo_id,file_path: $file_path})
-                MATCH (target)-[:CONTAINS]->(cl:Class)-[:CONTAINS]->(m:Function)
-                MATCH (m)-[:CALLS]->(callee:Function)
-                WHERE callee.file_path IS NOT NULL AND callee.file_path <> $file_path
+                MATCH (target:File {repo_id: $repo_id, file_path: $file_path})
+                MATCH (target)-[:CONTAINS]->(:Class)-[:CONTAINS]->(caller:Function)
+                MATCH (caller)-[:CALLS]->(callee:Function)
+                WHERE callee.repo_id = $repo_id
+                  AND callee.file_path IS NOT NULL AND callee.file_path <> $file_path
                 RETURN DISTINCT callee.file_path AS other_file
                 UNION
-                MATCH (target:File {repo_id: $repo_id,file_path: $file_path})
+                MATCH (caller:Function)-[:CALLS]->(callee:Function)
+                WHERE caller.repo_id = $repo_id AND callee.repo_id = $repo_id
+                  AND caller.file_path = $file_path
+                  AND callee.file_path IS NOT NULL AND callee.file_path <> $file_path
+                RETURN DISTINCT callee.file_path AS other_file
+                UNION
+                MATCH (target:File {repo_id: $repo_id, file_path: $file_path})
                 MATCH (target)-[:CONTAINS]->(cl:Class)
                 MATCH (cl)-[:INHERITS|IMPLEMENTS]->(base:Class)
-                WHERE base.file_path IS NOT NULL AND base.file_path <> $file_path
+                WHERE base.repo_id = $repo_id
+                  AND base.file_path IS NOT NULL AND base.file_path <> $file_path
                 RETURN DISTINCT base.file_path AS other_file
                 """,
-                {"repo_id": repo_id,"file_path": file_path},
+                params,
             )
-            return [record["other_file"] for record in result if record and record.get("other_file")]
+            out = [record["other_file"] for record in result if record and record.get("other_file")]
+            return list(dict.fromkeys(out))
