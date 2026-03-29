@@ -337,11 +337,11 @@ class Neo4jService:
                 session.run("""
                     MERGE (f:Function {
                         repo_id: $repo_id,
-                        name: $name,
-                        full_name: $full_name,
-                        signature: $signature
+                        full_name: $full_name
                     })
-                    SET f.file_path = $file_path,
+                    SET f.name = $name,
+                        f.signature = $signature,
+                        f.file_path = $file_path,
                         f.source_code = $source_code,
                         f.docstring = $docstring,
                         f.params = $params,
@@ -368,18 +368,14 @@ class Neo4jService:
                     MATCH (file:File {repo_id: $repo_id, name: $file_name, file_path: $file_path})
                     MATCH (f:Function {
                         repo_id: $repo_id,
-                        name: $name,
-                        full_name: $full_name,
-                        signature: $signature
+                        full_name: $full_name
                     }) 
                     MERGE (file)-[:CONTAINS]->(f)
                 """, {
                     'repo_id': repo_id,
                     'file_name': file_node.name,
                     'file_path': file_node.file_path,
-                    'name': function_node.name,
                     'full_name': function_node.full_name,
-                    'signature': function_node.signature
                 })
                 
                 # 3. 处理函数调用关系
@@ -412,11 +408,11 @@ class Neo4jService:
                 session.run("""
                     MERGE (f:Function {
                         repo_id: $repo_id,
-                        name: $name,
-                        full_name: $full_name,
-                        signature: $signature
+                        full_name: $full_name
                     })
-                    SET f.file_path = $file_path,
+                    SET f.name = $name,
+                        f.signature = $signature,
+                        f.file_path = $file_path,
                         f.source_code = $source_code,
                         f.docstring = $docstring,
                         f.params = $params,
@@ -443,18 +439,14 @@ class Neo4jService:
                     MATCH (c:Class {repo_id: $repo_id, name: $class_name, full_name: $class_full_name})
                     MATCH (f:Function {
                         repo_id: $repo_id,
-                        name: $name,
-                        full_name: $full_name,
-                        signature: $signature
+                        full_name: $full_name
                     }) 
                     MERGE (c)-[:CONTAINS]->(f)
                 """, {
                     'repo_id': repo_id,
                     'class_name': class_node.name,
                     'class_full_name': class_node.full_name,
-                    'name': function_node.name,
                     'full_name': function_node.full_name,
-                    'signature': function_node.signature
                 })
                 
                 # 3. 处理函数调用关系
@@ -472,35 +464,28 @@ class Neo4jService:
         with self.driver.session() as session:
             try:
                 session.run("""
-                    // 找到调用方函数
                     MATCH (caller:Function {
                         repo_id: $repo_id,
-                        name: $caller_name,
-                        full_name: $caller_full_name,
-                        signature: $caller_signature
+                        full_name: $caller_full_name
                     })
                     
                     // 找到被调用方（可能是函数、方法或API），找不到先按照API方式创建
                     MERGE (callee:Function {
                         repo_id: $repo_id,
-                        name: $callee_name,
-                        full_name: $callee_full_name,
-                        signature: $callee_signature
+                        full_name: $callee_full_name
                     })
                     ON CREATE SET
+                        callee.name = $callee_name,
                         callee.node_type = 'api',
                         callee.created_at = datetime($updated_at)
-                    SET callee.updated_at = datetime($updated_at)
-                    
-                    
-                    // 创建调用关系
+                    SET callee.name = $callee_name,
+                        callee.signature = $callee_signature,
+                        callee.updated_at = datetime($updated_at)
                     WITH caller, callee
                     MERGE (caller)-[r:CALLS]->(callee)
                 """, {
                     'repo_id': repo_id,
-                    'caller_name': function_node.name,
                     'caller_full_name': function_node.full_name,
-                    'caller_signature': function_node.signature,
                     'callee_name': call_info.name,
                     'callee_full_name': call_info.full_name,
                     'callee_signature': call_info.signature,

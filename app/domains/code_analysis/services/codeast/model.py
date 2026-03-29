@@ -94,10 +94,7 @@ class FunctionInfo:
     """函数节点（包括普通函数、类方法和API）"""
     # Key fields (必需字段，无默认值)
     name: str                   # 函数名（单纯函数名）
-    full_name: str              # 完整方法名（包含模块路径），例如:
-                               # - 普通函数: "app.utils.helper.process_data"
-                               # - 类方法: "app.models.User.save"
-                               # - API: "os.path.join"
+    full_name: str              # 完整方法名，作为函数全局唯一标识，不同语言组成方式不同
     
     signature: str             # 完整签名，包含参数类型和返回值类型
     # 函数类型，用于区分普通函数、类方法和API

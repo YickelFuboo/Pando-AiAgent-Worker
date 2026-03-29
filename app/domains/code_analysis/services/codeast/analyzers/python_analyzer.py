@@ -1,7 +1,7 @@
 import ast
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Set, Tuple
 from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, CallInfo, ClassType, FunctionType, Language as Lang
@@ -33,8 +33,10 @@ class PythonAnalyzer(LanguageAnalyzer):
             # 第一次遍历：处理类定义和收集类方法
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
-                    # 分析类
-                    class_node, methods = await self.analyze_class(node, imports_map)                    
+                    class_node, methods = await self.analyze_class(
+                        node=node,
+                        imports_map=imports_map,
+                    )
                     classes.append(class_node)
                     class_methods.update(methods)  # 使用 update 而不是 add
 
@@ -42,7 +44,13 @@ class PythonAnalyzer(LanguageAnalyzer):
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if node not in class_methods:
-                        functions.append(await self.analyze_function(node, imports_map))
+                        functions.append(
+                            await self.analyze_function(
+                                node=node,
+                                imports_map=imports_map,
+                                class_name=None,
+                            )
+                        )
             
             # 创建文件节点，统一使用正斜杠
             return FileInfo(
@@ -116,7 +124,12 @@ class PythonAnalyzer(LanguageAnalyzer):
         
         return imports
 
-    async def analyze_function(self, node, imports_map: dict, class_name: str = None) -> FunctionInfo:
+    async def analyze_function(
+        self,
+        node,
+        imports_map: dict,
+        class_name: str = None,
+    ) -> FunctionInfo:
         """分析Python函数"""
         source_code = ast.unparse(node)
         
@@ -139,7 +152,11 @@ class PythonAnalyzer(LanguageAnalyzer):
         
         # 生成完整路径（模块路径+函数名）
         module_path = self._get_module_path()
-        full_name = f"{module_path}.{node.name}"
+        full_name = (
+            f"{module_path}.{class_name}.{node.name}"
+            if class_name
+            else f"{module_path}.{node.name}"
+        )
         
         # 生成函数签名（函数名+参数类型+返回类型）
         # 只包含参数类型，不包含参数名，避免参数名不同但类型相同的函数被认为是不同的签名
@@ -148,7 +165,12 @@ class PythonAnalyzer(LanguageAnalyzer):
         signature = f"{node.name}({param_signature}) -> {return_type_str}"
         
         # 分析函数调用，传入导入映射和类名（如果是类方法）
-        calls = await self._get_function_calls(node, imports_map, module_path, class_name)
+        calls = await self._get_function_calls(
+            node,
+            imports_map,
+            module_path,
+            class_name,
+        )
          
         return FunctionInfo(
             name=node.name,
@@ -167,13 +189,20 @@ class PythonAnalyzer(LanguageAnalyzer):
             calls=calls
         )
         
-    async def _get_function_calls(self, node, imports_map: dict, module_path: str, class_name: str = None) -> List[CallInfo]:
+    async def _get_function_calls(
+        self,
+        node,
+        imports_map: dict,
+        module_path: str,
+        class_name: str = None,
+    ) -> List[CallInfo]:
         """分析函数调用
         
         Args:
             node: 函数节点
             imports_map: 导入映射
             module_path: 当前模块路径
+            class_name: 类名
             
         Returns:
             List[CallInfo]: 调用信息列表
@@ -238,7 +267,6 @@ class PythonAnalyzer(LanguageAnalyzer):
                                     signature=self._build_call_signature(n, func_name)
                                 ))
                             else:
-                                # 本地类的方法调用
                                 full_name = f"{module_path}.{value_name}.{func_name}"
                                 calls.append(CallInfo(
                                     name=func_name,
@@ -335,7 +363,11 @@ class PythonAnalyzer(LanguageAnalyzer):
         # 当前简单返回 None，后续可以扩展
         return None
 
-    async def analyze_class(self, node: ast.ClassDef, imports_map: dict) -> ClassInfo:
+    async def analyze_class(
+        self,
+        node: ast.ClassDef,
+        imports_map: dict,
+    ) -> Tuple[ClassInfo, Set[ast.FunctionDef]]:
         """分析Python类"""
         source_code = ast.unparse(node)
         
@@ -366,12 +398,15 @@ class PythonAnalyzer(LanguageAnalyzer):
                 # 记录类方法，用于后续过滤顶层函数
                 class_methods.add(item)
 
-                method = await self.analyze_function(item, imports_map, class_name=node.name)
                 # 转换为方法类型
+                method = await self.analyze_function(
+                    node=item,
+                    imports_map=imports_map,
+                    class_name=node.name,
+                )
                 method.type = FunctionType.METHOD.value
                 method.class_name = node.name
-                # 更新方法的完整名称，使用类的完整名称
-                method.full_name = f"{full_name}.{method.name}"
+                method.full_name = f"{module_path}.{node.name}.{method.name}"
                 methods.append(method)
             elif isinstance(item, ast.AnnAssign):
                 if isinstance(item.target, ast.Name):
@@ -530,14 +565,11 @@ class PythonAnalyzer(LanguageAnalyzer):
 
 
     def _get_module_path(self) -> str:
-        """获取当前文件的模块路径
-        
-        Returns:
-            str: 模块路径，例如: "app.models.user"
-            
-        Examples:
-            文件路径: "E:/project/app/models/user.py"
-            项目路径: "E:/project"
-            返回: "app.models.user"
-        """
-        return os.path.splitext(os.path.relpath(self.file_path, self.base_path))[0].replace(os.sep, '.') 
+        """获取当前文件的模块路径：相对仓库根路径去 .py 后将 / 转为 ."""
+        rel = normalize_path(os.path.relpath(self.file_path, self.base_path)).strip()
+        if not rel.lower().endswith(".py"):
+            return rel.replace("/", ".")
+        base = rel[:-3]
+        if not base:
+            return ""
+        return base.replace("/", ".")
