@@ -168,13 +168,14 @@ class Neo4jService:
                 session.run("""
                     MERGE (f:File {
                         repo_id: $repo_id,
-                        name: $name,
                         file_path: $file_path
                     })
                     SET f.language = $language,
                         f.imports = $imports,
+                        f.name = $name,
                         f.display_name = $name,
                         f.updated_at = datetime($updated_at)
+                    REMOVE f.dependent_files
                     WITH f
                     WHERE f.created_at IS NULL
                     SET f.created_at = datetime($updated_at)
@@ -187,6 +188,22 @@ class Neo4jService:
                     'imports': file_node.imports,
                     'updated_at': local_now_iso(),
                 })
+
+                deps = file_node.dependent_files or []
+                if deps:
+                    session.run("""
+                        MATCH (f:File {repo_id: $repo_id, file_path: $file_path})
+                        WITH f
+                        UNWIND $dep_paths AS dp
+                        MERGE (t:File {repo_id: $repo_id, file_path: dp})
+                        MERGE (f)-[r:DEPENDS_ON]->(t)
+                        SET r.updated_at = datetime($updated_at)
+                    """, {
+                        'repo_id': repo_id,
+                        'file_path': file_node.file_path,
+                        'dep_paths': deps,
+                        'updated_at': local_now_iso(),
+                    })
 
                 # 2. 保存文件中的类和函数节点            
                 if file_node.classes:

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, List
 
@@ -150,6 +150,7 @@ class FileInfo:
     functions: List[FunctionInfo]
     classes: List[ClassInfo]
     imports: List[str]
+    dependent_files: List[str] = field(default_factory=list)
 
 @dataclass
 class FolderInfo:

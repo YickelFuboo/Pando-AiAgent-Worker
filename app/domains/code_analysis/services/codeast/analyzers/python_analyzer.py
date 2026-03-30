@@ -1,6 +1,7 @@
 import ast
 import logging
 import os
+from collections import deque
 from typing import List, Optional, Set, Tuple
 from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
@@ -19,9 +20,8 @@ class PythonAnalyzer(LanguageAnalyzer):
                 content = f.read()
             
             tree = ast.parse(content)
-            
-            # 先分析导入
-            imports_map = self._analyze_imports(tree)
+            current_module = self._get_module_path()
+            imports_map, import_module_prefixes = self._analyze_imports(tree, current_module)
             
             # 分别存储顶层函数和类
             functions = []
@@ -53,13 +53,16 @@ class PythonAnalyzer(LanguageAnalyzer):
                         )
             
             # 创建文件节点，统一使用正斜杠
+            rel_self = normalize_path(os.path.relpath(self.file_path, self.base_path))
+            dep_paths = self._dependent_files_from_import_module_prefixes(import_module_prefixes)
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
+                file_path=rel_self,
                 language=Lang.PYTHON,
                 functions=functions,
                 classes=classes,
-                imports=list(imports_map.values())
+                imports=list(imports_map.values()),
+                dependent_files=dep_paths,
             )
             
         except Exception as e:
@@ -67,30 +70,47 @@ class PythonAnalyzer(LanguageAnalyzer):
             logging.error(f"Error type: {type(e)}")
             return None
 
-    def _analyze_imports(self, tree: ast.AST) -> dict:
-        """获取Python文件的导入依赖，将相对导入转换为项目内的绝对路径
-        
+    def _analyze_imports(
+        self, tree: ast.AST, current_module: str
+    ) -> Tuple[dict, Set[str]]:
+        """获取Python文件的导入依赖，将相对导入转换为项目内的绝对路径（单次 ast.walk 同时收集解析 dependent_files 用的点路径集合）。
         Args:
             tree: 已解析的AST
             
         Returns:
-            dict: 导入映射 {local_name: full_path}
+            (imports_map, import_module_prefixes):
+                imports_map — 导入映射 {local_name: full_path}
+                import_module_prefixes — 由 import 语句归纳出的点路径集合（含包前缀与 `pkg.sym` 等），用于解析本仓库内 dependent_files
             
         Examples:
             对于文件 app/models/user.py:
-            from ..utils import helper -> app.utils.helper
-            from .base import Model -> app.models.base
-            from app.config import settings -> app.config.settings
+            from ..utils import helper -> {helper: app.utils.helper}  / app/utils/helper.py
+            from .base import Model -> {Model: app.models.base}  / app/models/base.py
+            from app.config import settings -> {settings: app.config.settings}  / app/config/settings.py
         """
-        imports = {}
-        
-        # 获取当前模块的路径
-        current_module = self._get_module_path()
-        
+        imports_map: dict = {}
+        import_module_prefixes: Set[str] = set()
         for node in ast.walk(tree):
+            # ast.Import（样例 ⇄ 字段）：
+            #   import os
+            #     node.names：仅含本句的一个 alias；alias.name = 样例里的「os」；alias.asname = None。
+            #   import numpy as np
+            #     node.names：一个 alias；alias.name = 「numpy」；alias.asname = 「np」。
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    imports[alias.asname or alias.name] = alias.name
+                    imports_map[alias.asname or alias.name] = alias.name
+                    if alias.name:
+                        import_module_prefixes.add(alias.name)
+            # ast.ImportFrom（样例 ⇄ 字段）：
+            #   from app.config import settings
+            #     node.level = 0；node.module = 「app.config」；alias.name = 「settings」；alias.asname = None。
+            #   from app.config import settings as cfg
+            #     node.level = 0；alias.name = 「settings」；alias.asname = 「cfg」。
+            #   from .base import Model（设 current_module = app.models.user）
+            #     node.level = 1（一个点前缀）；node.module = 「base」；alias.name = 「Model」；full_module 由 current_module 去掉末段后与 node.module 拼接得 app.models.base。
+            #   from ..utils import helper（同上 current_module）
+            #     node.level = 2（两个点）；node.module = 「utils」；alias.name = 「helper」；full_module 对应 app.utils。
+            #   full_module 再与 alias.name 拼成 imports 里的值。
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ''
                 level = node.level  # 相对导入的层级数
@@ -114,15 +134,23 @@ class PythonAnalyzer(LanguageAnalyzer):
                     # 绝对导入
                     full_module = module
                 
+                if full_module:
+                    import_module_prefixes.add(full_module)
                 # 处理导入的具体名称
                 for alias in node.names:
                     local_name = alias.asname or alias.name
                     if full_module:
-                        imports[local_name] = f"{full_module}.{alias.name}"
+                        imports_map[local_name] = f"{full_module}.{alias.name}"
+                        if alias.name != "*":
+                            import_module_prefixes.add(f"{full_module}.{alias.name}")
                     else:
-                        imports[local_name] = alias.name
-        
-        return imports
+                        imports_map[local_name] = alias.name
+                        if alias.name != "*":
+                            if current_module:
+                                import_module_prefixes.add(f"{current_module}.{alias.name}")
+                            elif alias.name:
+                                import_module_prefixes.add(alias.name)
+        return imports_map, import_module_prefixes
 
     async def analyze_function(
         self,
@@ -563,9 +591,12 @@ class PythonAnalyzer(LanguageAnalyzer):
         
         return list(set(returns))  # 去重 
 
-
     def _get_module_path(self) -> str:
-        """获取当前文件的模块路径：相对仓库根路径去 .py 后将 / 转为 ."""
+        """由当前分析文件的相对路径推出「模块点路径」，用于相对 import 解析与 full_name 前缀。
+
+        规则：相对 self.base_path 的路径去掉 .py 后缀，路径分隔符换成点号。
+        非 .py 后缀时仍做 / -> .，用于特殊扩展名文件占位。
+        """
         rel = normalize_path(os.path.relpath(self.file_path, self.base_path)).strip()
         if not rel.lower().endswith(".py"):
             return rel.replace("/", ".")
@@ -573,3 +604,145 @@ class PythonAnalyzer(LanguageAnalyzer):
         if not base:
             return ""
         return base.replace("/", ".")
+
+    def _dotted_to_repo_rel(self, dotted: str) -> Optional[str]:
+        """将模块点路径转换为仓库内相对路径
+        input: dotted: 模块点路径
+        output: 仓库内相对路径
+        Examples:
+            app.utils.helper -> app/utils/helper.py
+            app.config.settings -> app/config/settings.py
+            app.models.user -> app/models/user.py
+            app.models.user.User -> app/models/user/User.py
+            app.models.user.User.User -> app/models/user/User/User.py
+            app.models.user.User.User.User -> app/models/user/User/User/User.py
+        """
+        if not dotted:
+            return None
+        
+        rel_base = dotted.replace(".", os.sep)
+        for rel in (f"{rel_base}.py", os.path.join(rel_base, "__init__.py")):
+            # 将操作系统路径转换为绝对路径
+            abs_path = os.path.join(self.base_path, rel)
+            # 判断是否是文件
+            if os.path.isfile(abs_path):
+                return normalize_path(os.path.relpath(abs_path, self.base_path))
+        return None
+
+    def _dependent_files_from_import_module_prefixes(self, import_module_prefixes: Set[str]) -> List[str]:
+        """把 import 归纳出的模块点路径集合，转换成本仓库内被依赖文件的相对路径列表。
+
+        功能分步：
+        1) 点路径到磁盘：对每个点路径依次尝试「同名单文件 .py」「目录包下的 __init__.py」，在 self.base_path 下存在则记为依赖。
+        2) 展开包入口：若依赖落在某包 __init__.py，则静态解析该文件中的 import（以该包目录对应的点路径为 current_module），
+           将再导出所指向的子模块、子包继续映射为路径并入集合，避免「只依赖到空壳 __init__、实现其实在子文件」时边丢失。
+        3) 对已出现的 __init__.py 做队列 BFS；seen_init 避免循环 re-export 死循环。始终排除当前正在分析的本文件路径。
+        4) 返回去重、排序后的路径列表。
+
+        局限：仅 AST 静态可见的 import；动态 import、仅 __all__ 字符串列表等无法覆盖。
+
+        说明：内部嵌套 dotted_to_repo_rel 仅复用「点路径 -> 仓库相对路径」判定，不单独成类方法。
+
+        input: import_module_prefixes: 模块点路径集合
+        output: 仓库内相对路径列表
+        Examples:
+            [app.utils.helper, app.config.settings, app.models.user] -> [app/utils/helper.py, app/config/settings.py, app/models/user.py]
+        """
+        cur_file_rel_path = normalize_path(os.path.relpath(self.file_path, self.base_path))
+
+
+        # 1) 点路径到磁盘：对每个点路径依次尝试「同名单文件 .py」「目录包下的 __init__.py」，在 self.base_path 下存在则记为依赖。
+        dependent_files: Set[str] = set()
+        for dotted in import_module_prefixes:
+            if not dotted:
+                continue
+            found = self._dotted_to_repo_rel(dotted)
+            if found and found != cur_file_rel_path:
+                dependent_files.add(found)
+
+        # 2) 若依赖落在某包 __init__.py，则静态解析该文件中的 import（以该包目录对应的点路径为 current_module），
+        seen_init: Set[str] = set()
+        queue = deque(f for f in dependent_files if f.endswith("__init__.py"))
+        while queue:
+            init_file_rel_path = queue.popleft()
+            if init_file_rel_path in seen_init:
+                continue
+            seen_init.add(init_file_rel_path)
+
+            abs_init_file_path = os.path.join(self.base_path, init_file_rel_path.replace("/", os.sep))
+            if not os.path.isfile(abs_init_file_path):
+                continue
+            try:
+                with open(abs_init_file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except OSError:
+                continue
+            
+            # 解析 __init__.py 文件
+            try:                
+                tree = ast.parse(content)
+            except SyntaxError:
+                continue
+
+            np = normalize_path(init_file_rel_path).strip()
+            base_dir = np[: -len("__init__.py")].rstrip("/")
+            if not base_dir:
+                continue
+            pkg = base_dir.replace("/", ".")
+            # 以 __init__.py 自身作为“当前模块”来解析相对导入，避免相对层级偏移。
+            sub_imports_map, sub_import_module_prefixes = self._analyze_imports(
+                tree, f"{pkg}.__init__"
+            )
+
+            # 仅展开业务实际请求的 pkg.<symbol>，减少把 __init__.py 里所有 re-export 全量并入 dependent_files 的情况。
+            requested_symbols: Set[str] = set()
+            pkg_prefix = f"{pkg}."
+            for dotted in import_module_prefixes:
+                if dotted.startswith(pkg_prefix):
+                    suffix = dotted[len(pkg_prefix):]
+                    # 在这里把 “pkg.<symbol>” 视作请求符号；若是 “pkg.sub.attr” 这类更深层路径，交给对应子包 __init__.py 展开。
+                    if suffix and "." not in suffix:
+                        requested_symbols.add(suffix)
+
+            if requested_symbols:
+                missing_symbol = False
+                for sym in requested_symbols:
+                    target = sub_imports_map.get(sym)
+                    if not target:
+                        missing_symbol = True
+                        continue
+
+                    # target 可能是 “pkg.submod.<Attr>” 或 “pkg.submod”（当 sym 本身是子模块时）。
+                    found = self._dotted_to_repo_rel(target)
+                    if not found:
+                        parts = target.split(".")
+                        if len(parts) > 1:
+                            found = self._dotted_to_repo_rel(".".join(parts[:-1]))
+
+                    if not found or found == cur_file_rel_path:
+                        continue
+                    if found not in dependent_files:
+                        dependent_files.add(found)
+                        if found.endswith("__init__.py"):
+                            queue.append(found)
+                # 若找不到部分 re-export 的导入来源，就只能退回保守展开，避免 dependent_files 少量缺失。
+                if missing_symbol:
+                    for sub_dotted in sub_import_module_prefixes:
+                        found = self._dotted_to_repo_rel(sub_dotted)
+                        if not found or found == cur_file_rel_path:
+                            continue
+                        if found not in dependent_files:
+                            dependent_files.add(found)
+                            if found.endswith("__init__.py"):
+                                queue.append(found)
+            else:
+                # 若业务没具体请求到 pkg.<symbol>（例如只 import pkg），则只能保守展开，避免漏掉潜在依赖。
+                for sub_dotted in sub_import_module_prefixes:
+                    found = self._dotted_to_repo_rel(sub_dotted)
+                    if not found or found == cur_file_rel_path:
+                        continue
+                    if found not in dependent_files:
+                        dependent_files.add(found)
+                        if found.endswith("__init__.py"):
+                            queue.append(found)
+        return sorted(dependent_files)
