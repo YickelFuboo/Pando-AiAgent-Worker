@@ -66,9 +66,19 @@ class ExecTool(BaseTool):
 
     @property
     def description(self) -> str:
-        base = "Execute a shell command and return its output. Use with caution."
+        base = """Execute a shell command and return its output.
+
+Usage:
+- Use this tool for terminal operations.
+- Do not use this tool for file read/write/search/edit when dedicated tools are available.
+- Use `working_dir` to change directories. Avoid `cd <dir> && <command>` patterns.
+- Always quote paths that contain spaces with double quotes.
+- `timeout` is in milliseconds. If omitted, the default timeout is 120000ms.
+- If running multiple commands: use parallel tool calls for independent commands, or use `&&` when order matters.
+- Use `;` only when you want later commands to run even if earlier commands fail.
+"""
         if sys.platform == "win32":
-            base += " On Windows, use PowerShell or cmd; Unix commands (e.g. head, tail, grep) are not available by default."
+            base += " On Windows, use PowerShell or cmd syntax; Unix-only commands may be unavailable by default."
         return base
     
     @property
@@ -83,13 +93,35 @@ class ExecTool(BaseTool):
                 "working_dir": {
                     "type": "string",
                     "description": "Optional working directory for the command"
-                }
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Optional timeout in milliseconds."
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional short description of what this command does."
+                },
             },
             "required": ["command"]
         }
-    
-    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> ToolResult:
+
+    async def execute(
+        self,
+        command: str,
+        working_dir: str | None = None,
+        timeout: float | None = None,
+        description: str | None = None,
+        **kwargs: Any
+    ) -> ToolResult:
+        _ = description
         cwd = working_dir or self.working_dir or os.getcwd()
+        timeout_sec = self.timeout
+        if timeout is not None:
+            if timeout < 0:
+                return ToolErrorResult(f"Invalid timeout value: {timeout}. Timeout must be a positive number.")
+            timeout_sec = max(1, int(float(timeout) / 1000))
+
         try:
             cwd_path = Path(cwd).expanduser().resolve()
         except Exception:
@@ -107,7 +139,7 @@ class ExecTool(BaseTool):
                     _run_shell_sync,
                     command,
                     str(cwd_path),
-                    self.timeout,
+                    timeout_sec,
                 )
             else:
                 process = await asyncio.create_subprocess_shell(
@@ -119,7 +151,7 @@ class ExecTool(BaseTool):
                 try:
                     stdout, stderr = await asyncio.wait_for(
                         process.communicate(),
-                        timeout=self.timeout,
+                        timeout=timeout_sec,
                     )
                 except asyncio.TimeoutError:
                     process.kill()
@@ -127,7 +159,7 @@ class ExecTool(BaseTool):
                         await asyncio.wait_for(process.wait(), timeout=5.0)
                     except asyncio.TimeoutError:
                         pass
-                    return ToolErrorResult(f"Error: Command timed out after {self.timeout} seconds")
+                    return ToolErrorResult(f"Error: Command timed out after {timeout_sec} seconds")
                 returncode = process.returncode or 0
 
             output_parts = []
@@ -150,7 +182,7 @@ class ExecTool(BaseTool):
             return ToolSuccessResult(result)
 
         except subprocess.TimeoutExpired:
-            return ToolErrorResult(f"Error: Command timed out after {self.timeout} seconds")
+            return ToolErrorResult(f"Error: Command timed out after {timeout_sec} seconds")
         except Exception as e:
             msg = str(e) or repr(e)
             logging.error("Error executing command: %s (type=%s)", msg, type(e).__name__)
