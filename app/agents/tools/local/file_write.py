@@ -1,4 +1,3 @@
-import os
 from typing import Dict,Any,Optional
 import logging
 import difflib
@@ -48,7 +47,7 @@ def _two_files_patch(old_path: str, new_path: str, old_content: str, new_content
 
 
 class WriteFileTool(BaseTool):
-    """写入文件工具"""  
+    """Write content to a file."""
     @property
     def name(self) -> str:
         return "write_file"   
@@ -91,13 +90,16 @@ Usage:
     async def execute(self, path: str, content: str, mode: str = "w", **kwargs) -> ToolResult:
         try:
             if not path or not path.strip() or content is None:
-                logging.error("参数错误: path=%r, content=%r", path, content)
+                logging.error("Invalid parameters: path=%r, content=%r", path, content)
                 return ToolErrorResult("Missing path or content parameter")     
 
             open_mode = "a" if mode == "a" else "w"
 
             file_path = Path(path).expanduser().resolve()
             existed = file_path.exists()
+            if existed and not file_path.is_file():
+                logging.error("Not a file: path=%s", file_path)
+                return ToolErrorResult(f"Not a file: {path}")
             old_content = ""
             if existed and file_path.is_file():
                 with open(file_path, "r", encoding="utf-8", errors="replace") as f:
@@ -134,21 +136,28 @@ Usage:
             logging.error("Failed to write file: path=%r, error=%s", path, e)
             return ToolErrorResult(f"Failed to write file: {str(e)}") 
 
-class ReleaseFileTextTool(BaseTool):
+class ReplaceFileTextTool(BaseTool):
     """Replace text in a file."""
     @property
     def name(self) -> str:
-        return "release_file_text"
+        return "replace_file_text"
     
     @property
     def description(self) -> str:
-        return """Edit a file by replacing old_text with new_text.
+        return """Performs exact string replacements in files.
 
 Usage:
 - Provide the target file with `path`.
-- `old_text` must match file content exactly and be unique in the file.
-- If `old_text` appears multiple times, provide more surrounding context to make it unique.
-- Returns a unified diff in `<diff>` to help verify the exact change."""
+- You should read the file before editing to avoid accidental mismatches.
+- Match `old_text` exactly as it appears in file content (including spaces/indentation).
+- Prefer editing existing files. Do not create new files unless required.
+- Only use emojis if the user explicitly requests it.
+- The edit fails if `old_text` is not found in the file.
+- By default, this tool replaces a single unique match.
+- The edit fails if `old_text` appears multiple times and `replaceAll` is not true.
+- When multiple matches exist, either provide more surrounding context in `old_text` or set `replaceAll=true`.
+- Use `replaceAll` for file-wide renaming/replacement operations.
+- Use `write_file` for full-file overwrite; `old_text` must not be empty in this tool."""
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -166,16 +175,31 @@ Usage:
                 "new_text": {
                     "type": "string",
                     "description": "The text to replace with"
+                },
+                "replaceAll": {
+                    "type": "boolean",
+                    "description": "Replace all occurrences of old_text (default false)"
                 }
             },
             "required": ["path", "old_text", "new_text"]
         }
     
-    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> ToolResult:
+    async def execute(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        replaceAll: Optional[bool] = None,
+        **kwargs: Any
+    ) -> ToolResult:
         try:
-            if not path or not path.strip() or not old_text or not new_text:
+            if not path or not path.strip() or old_text is None or new_text is None:
                 logging.error("Invalid parameters: path=%r, old_text=%r, new_text=%r", path, old_text, new_text)
                 return ToolErrorResult("Missing path, old_text or new_text parameter")
+            if old_text == "":
+                return ToolErrorResult("old_text must not be empty. Use write_file for full overwrite.")
+            if old_text == new_text:
+                return ToolErrorResult("No changes to apply: old_text and new_text are identical.")
 
             file_path = Path(path).expanduser().resolve()
             if not file_path.exists():
@@ -198,17 +222,24 @@ Usage:
                 return ToolErrorResult(self._not_found_message(old_text, content, path))
             
             count = content.count(old_text)
-            if count > 1:
+            if count > 1 and not replaceAll:
                 logging.warning(
                     "old_text appears %d times in %s. Please provide more context.",
                     count,
                     file_path,
                 )
                 return ToolErrorResult(
-                    f"old_text appears {count} times. Please provide more context to make it unique."
+                    f"old_text appears {count} times. Please provide more context to make it unique or set replaceAll=true."
                 )
 
-            new_content = content.replace(old_text, new_text, 1)
+            if replaceAll:
+                new_content = content.replace(old_text, new_text)
+                replaced_count = count
+            else:
+                new_content = content.replace(old_text, new_text, 1)
+                replaced_count = 1
+            if new_content == content:
+                return ToolErrorResult("No changes to apply.")
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
 
@@ -218,7 +249,7 @@ Usage:
             output = "\n".join([
                 f"<path>{file_path}</path>",
                 "<content>",
-                f"Successfully edited {path}",
+                f"Successfully edited {path} (replaced {replaced_count} occurrence{'s' if replaced_count != 1 else ''})",
                 "</content>",
                 "<diff>",
                 diff,
@@ -226,10 +257,10 @@ Usage:
             ])
             return ToolSuccessResult(output)
         except PermissionError as e:
-            logging.error("权限错误: path=%r, error=%s", path, e)
+            logging.error("Permission error: path=%r, error=%s", path, e)
             return ToolErrorResult(f"Permission error: {str(e)}")
         except Exception as e:
-            logging.error("编辑文件异常: path=%r, error=%s", path, e)
+            logging.error("Failed to edit file: path=%r, error=%s", path, e)
             return ToolErrorResult(f"Failed to edit file: {str(e)}")
 
     @staticmethod
@@ -255,7 +286,7 @@ Usage:
         return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
 
 class InsertFileTool(BaseTool):
-    """Insert content into a file."""  
+    """Insert content into a file."""
     @property
     def name(self) -> str:
         return "insert_file"   
@@ -279,20 +310,20 @@ Usage:
                     "type": "string",
                     "description": "The full path to the file to insert content into."
                 },
-                "position": {
-                    "type": "integer",
-                    "description": "The line number to insert content at. If None, will insert at end of file."
-                },
                 "content": {
                     "type": "string",
                     "description": "The content to insert into the file."
+                },
+                "position": {
+                    "type": "integer",
+                    "description": "The line number to insert content at. If None, will insert at end of file."
                 }
             },
             "required": ["path", "content"]
         }      
 
             
-    async def execute(self, path: str, position: Optional[int], content: str, **kwargs) -> ToolResult:
+    async def execute(self, path: str, content: str, position: Optional[int] = None, **kwargs) -> ToolResult:
         try:
             if not path or not path.strip() or content is None:
                 logging.error("Invalid parameters: path=%r, content=%r", path, content)
