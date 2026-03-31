@@ -7,73 +7,228 @@ from ..base import BaseTool
 from ..schemes import ToolResult,ToolSuccessResult,ToolErrorResult
 
 
-class ReadFileTool(BaseTool):
-    """文件读取工具"""
+class WriteFileTool(BaseTool):
+    """写入文件工具"""  
     @property
     def name(self) -> str:
-        return "read_file"
-        
+        return "write_file"   
+
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path."
-        
+        return "Write content to a file at the given path. Creates parent directories if needed. Use mode='w' to overwrite (first chunk) and mode='a' to append (subsequent chunks) for long content."
+    
     @property
     def parameters(self) -> Dict[str, Any]:
         return {
-            "type": "object",   
+            "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The full path to the file to read."
+                    "description": "The full path to the file to write to."
                 },
-                "offset": {
-                    "type": "integer",
-                    "description": "Optional line number to start reading from (1-indexed)."
+                "content": {
+                    "type": "string",
+                    "description": "The content to write to the file. Prefer to keep each write chunk small to avoid tool call truncation.",
                 },
-                "limit": {
-                    "type": "integer",
-                    "description": "Optional maximum number of lines to read."
+                "mode": {
+                    "type": "string",
+                    "enum": ["w","a"],
+                    "description": "w=overwrite (first chunk), a=append (subsequent chunks). Default is w."
                 }
             },
-            "required": ["path"]
+            "required": ["path", "content"]
+        }  
+
+    async def execute(self, path: str, content: str, mode: str = "w", **kwargs) -> ToolResult:
+        try:
+            if not path or not path.strip() or content is None:
+                logging.error("参数错误: path=%r, content=%r", path, content)
+                return ToolErrorResult("Missing path or content parameter")     
+
+            open_mode = "a" if mode == "a" else "w"
+
+            file_path = Path(path).expanduser().resolve()
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+                  
+            with open(file_path, open_mode, encoding="utf-8") as f:
+                f.write(content)
+            action = "appended" if open_mode == "a" else "written"
+            return ToolSuccessResult(f"Successfully {action} {len(content)} bytes to {path} (mode={open_mode})")
+            
+        except Exception as e:
+            logging.error("Failed to write file: path=%r, error=%s", path, e)
+            return ToolErrorResult(f"Failed to write file: {str(e)}") 
+
+class ReleaseFileTextTool(BaseTool):
+    """Replace text in a file."""
+    @property
+    def name(self) -> str:
+        return "release_file_text"
+    
+    @property
+    def description(self) -> str:
+        return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
+    
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The file path to edit"
+                },
+                "old_text": {
+                    "type": "string",
+                    "description": "The exact text to find and replace"
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "The text to replace with"
+                }
+            },
+            "required": ["path", "old_text", "new_text"]
         }
     
-    async def execute(self, path: str, offset: Optional[int] = None, limit: Optional[int] = None, **kwargs) -> ToolResult:
+    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> ToolResult:
         try:
-            if not path or not path.strip():
-                logging.error("参数错误: path=%r", path)
-                return ToolErrorResult("Missing path parameter")
-            if offset is not None and offset < 1:
-                return ToolErrorResult("offset must be greater than or equal to 1")
-            if limit is not None and limit < 1:
-                return ToolErrorResult("limit must be greater than or equal to 1")
+            if not path or not path.strip() or not old_text or not new_text:
+                logging.error("Invalid parameters: path=%r, old_text=%r, new_text=%r", path, old_text, new_text)
+                return ToolErrorResult("Missing path, old_text or new_text parameter")
 
             file_path = Path(path).expanduser().resolve()
             if not file_path.exists():
-                logging.warning("文件不存在: path=%s", file_path)
+                logging.warning("File not found: path=%s", file_path)
                 return ToolErrorResult(f"File not found: {path}")
-                
+
             if not file_path.is_file():
-                logging.warning("不是文件路径: path=%s", file_path)
+                logging.warning("Not a file: path=%s", file_path)
                 return ToolErrorResult(f"Not a file: {path}")
 
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                if offset is None and limit is None:
-                    content = f.read()
-                else:
-                    lines = f.readlines()
-                    start = (offset or 1) - 1
-                    end = start + limit if limit is not None else len(lines)
-                    if start >= len(lines) and not (len(lines) == 0 and start == 0):
-                        return ToolErrorResult(
-                            f"Offset {offset} is out of range for this file ({len(lines)} lines)"
-                        )
-                    sliced = lines[start:end]
-                    content = "".join(
-                        f"{idx + start + 1}: {line}" for idx, line in enumerate(sliced)
-                    )
-            return ToolSuccessResult(content)
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            if old_text not in content:
+                logging.warning(
+                    "old_text not found in content: old_text=%r, path=%s",
+                    old_text,
+                    file_path,
+                )
+                return ToolErrorResult(self._not_found_message(old_text, content, path))
+            
+            count = content.count(old_text)
+            if count > 1:
+                logging.warning(
+                    "old_text appears %d times in %s. Please provide more context.",
+                    count,
+                    file_path,
+                )
+                return ToolErrorResult(
+                    f"old_text appears {count} times. Please provide more context to make it unique."
+                )
+
+            new_content = content.replace(old_text, new_text, 1)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+            return ToolSuccessResult(f"Successfully edited {path}")
+        except PermissionError as e:
+            logging.error("权限错误: path=%r, error=%s", path, e)
+            return ToolErrorResult(f"Permission error: {str(e)}")
+        except Exception as e:
+            logging.error("编辑文件异常: path=%r, error=%s", path, e)
+            return ToolErrorResult(f"Failed to edit file: {str(e)}")
+
+    @staticmethod
+    def _not_found_message(old_text: str, content: str, path: str) -> str:
+        """Build a helpful error when old_text is not found."""
+        lines = content.splitlines(keepends=True)
+        old_lines = old_text.splitlines(keepends=True)
+        window = len(old_lines)
+
+        best_ratio, best_start = 0.0, 0
+        for i in range(max(1, len(lines) - window + 1)):
+            ratio = difflib.SequenceMatcher(None, old_lines, lines[i : i + window]).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_start = ratio, i
+
+        if best_ratio > 0.5:
+            diff = "\n".join(difflib.unified_diff(
+                old_lines, lines[best_start : best_start + window],
+                fromfile="old_text (provided)", tofile=f"{path} (actual, line {best_start + 1})",
+                lineterm="",
+            ))
+            return f"Error: old_text not found in {path}.\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
+        return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+
+class InsertFileTool(BaseTool):
+    """Insert content into a file."""  
+    @property
+    def name(self) -> str:
+        return "insert_file"   
+        
+    @property
+    def description(self) -> str:
+        return "Insert content into a file at the given position."
+    
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The full path to the file to insert content into."
+                },
+                "position": {
+                    "type": "integer",
+                    "description": "The line number to insert content at. If None, will insert at end of file."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The content to insert into the file."
+                }
+            },
+            "required": ["path", "content"]
+        }      
+
+            
+    async def execute(self, path: str, position: Optional[int], content: str, **kwargs) -> ToolResult:
+        try:
+            if not path or not path.strip() or content is None:
+                logging.error("Invalid parameters: path=%r, content=%r", path, content)
+                return ToolErrorResult("Invalid parameters")     
+            
+            file_path = Path(path).expanduser().resolve()
+            if not file_path.exists():
+                logging.error("File not found: %s", file_path)
+                return ToolErrorResult("File not found")
+            
+            if not file_path.is_file():
+                logging.error("Not a file: %s", file_path)
+                return ToolErrorResult("Not a file")
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                
+            if position is None:
+                position = len(lines)
+            elif position < 0 or position > len(lines):
+                logging.error(
+                    "Invalid position: %d, file has %d lines", position, len(lines)
+                )
+                return ToolErrorResult(f"Invalid position: {position}, file has {len(lines)} lines")
+            
+            with open(file_path, "r+", encoding="utf-8") as f:
+                f.writelines(lines[:position])
+                f.write(content)
+                if not content.endswith("\n"):
+                    f.write("\n")
+                f.writelines(lines[position:])
+            
+            return ToolSuccessResult(f"Successfully inserted {len(content)} bytes at line {position} in file {path}")
             
         except Exception as e:
-            logging.error("读取文件异常: path=%r, error=%s", path, e)
-            return ToolErrorResult(f"Failed to read file: {str(e)}") 
+            logging.error("Failed to insert content: path=%r, error=%s", path, e)
+            return ToolErrorResult(f"Failed to insert content: {str(e)}") 
