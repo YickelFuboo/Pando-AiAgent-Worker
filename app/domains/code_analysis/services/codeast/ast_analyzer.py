@@ -10,6 +10,7 @@ from .analyzers.java_analyzer import JavaAnalyzer
 from .analyzers.go_analyzer import GoAnalyzer
 from .analyzers.cpp_analyzer import CppAnalyzer
 from .analyzers.c_analyzer import CAnalyzer
+from .analyzers.js_analyzer import JsAnalyzer
 from .model import FileInfo, FolderInfo, Language
 
 # 导入其他语言的分析器...
@@ -27,7 +28,8 @@ class FileAstAnalyzer:
             Language.JAVA: JavaAnalyzer(self.base_path, self.file_path),
             Language.GO: GoAnalyzer(self.base_path, self.file_path),
             Language.CPP: CppAnalyzer(self.base_path, self.file_path),
-            Language.C: CAnalyzer(self.base_path, self.file_path)
+            Language.C: CAnalyzer(self.base_path, self.file_path),
+            Language.JAVASCRIPT: JsAnalyzer(self.base_path, self.file_path),
         }
     
     def _detect_language(self) -> Language:
@@ -38,7 +40,11 @@ class FileAstAnalyzer:
             '.java': Language.JAVA,
             '.go': Language.GO,
             '.cpp': Language.CPP,
-            '.c': Language.C
+            '.c': Language.C,
+            '.js': Language.JAVASCRIPT,
+            '.jsx': Language.JAVASCRIPT,
+            '.mjs': Language.JAVASCRIPT,
+            '.cjs': Language.JAVASCRIPT,
         }
         return ext_map.get(ext, Language.UNKNOWN)
     
@@ -112,7 +118,9 @@ class FolderAstAnalyzer:
             item_path = os.path.join(folder_path, item)
 
             try:
-                if os.path.isfile(item_path) and item_path.endswith(('.py', '.java', '.go', '.cpp', '.c')) and not item_path.startswith('__'):
+                if os.path.isfile(item_path) and item_path.endswith(
+                    ('.py', '.java', '.go', '.cpp', '.c', '.js', '.jsx', '.mjs', '.cjs')
+                ) and not item_path.startswith('__'):
                     # 分析所有支持的文件类型
                     file_ast_analyzer = FileAstAnalyzer(self.base_path, item_path)
                     file_info = await file_ast_analyzer.analyze_file()

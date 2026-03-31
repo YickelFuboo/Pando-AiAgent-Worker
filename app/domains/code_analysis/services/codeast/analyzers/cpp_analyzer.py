@@ -1,12 +1,12 @@
 import logging
 import os
 import re
-from typing import List, Optional
+from typing import List,Optional,Set
 import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
 from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
-from ..model import FileInfo, FunctionInfo, ClassInfo, FunctionType, ClassType, Language as Lang
+from ..model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
 
 # 全局变量存储已加载的语言
 LANGUAGES = {}
@@ -67,14 +67,19 @@ class CppAnalyzer(LanguageAnalyzer):
                     await visit_node(child)
             
             await visit_node(tree.root_node)
+
+            imports = self.get_imports(content)
+            cur_file_rel_path = normalize_path(os.path.relpath(self.file_path, self.base_path))
+            dep_paths = self._dependent_files_from_includes(imports, cur_file_rel_path)
             
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
+                file_path=cur_file_rel_path,
                 language=Lang.CPP,
                 functions=functions,
                 classes=classes,
-                imports=self.get_imports(content, tree)
+                imports=imports,
+                dependent_files=dep_paths,
             )
         except Exception as e:
             logging.error(f"Error analyzing C++ file {self.file_path}: {str(e)}")
@@ -82,11 +87,42 @@ class CppAnalyzer(LanguageAnalyzer):
     
     def get_imports(self, content: str) -> List[str]:
         """获取C++文件的导入依赖"""
-        imports = []
+        imports: List[str] = []
         include_pattern = r'#include\s*[<"]([^>"]+)[>"]'
         for match in re.finditer(include_pattern, content):
             imports.append(match.group(1))
-        return imports
+        return list(dict.fromkeys(imports))
+
+    def _dependent_files_from_includes(self, includes: List[str], cur_file_rel_path: str) -> List[str]:
+        """把 C++ 的 include 映射到本仓库内被依赖文件（低档：文件级静态依赖）。"""
+        dependent_files: Set[str] = set()
+        cur_dir = os.path.dirname(self.file_path)
+
+        def add_if_inside_repo(abs_path: str) -> bool:
+            if not os.path.isfile(abs_path):
+                return False
+            rel = normalize_path(os.path.relpath(abs_path, self.base_path))
+            if rel.startswith("../") or rel == cur_file_rel_path:
+                return False
+            dependent_files.add(rel)
+            return True
+
+        for inc in includes:
+            if not inc:
+                continue
+            inc = inc.strip().replace("\\", "/")
+            if not inc:
+                continue
+
+            # 本地优先：当前文件目录 -> 仓库根目录
+            local_candidate = os.path.normpath(os.path.join(cur_dir, inc.replace("/", os.sep)))
+            if add_if_inside_repo(local_candidate):
+                continue
+
+            repo_candidate = os.path.normpath(os.path.join(self.base_path, inc.replace("/", os.sep)))
+            add_if_inside_repo(repo_candidate)
+
+        return sorted(dependent_files)
         
     def _get_function_name(self, node) -> str:
         """获取函数名"""

@@ -2,7 +2,7 @@ import ast
 import logging
 import os
 from collections import deque
-from typing import List, Optional, Set, Tuple
+from typing import List,Optional,Set,Tuple
 from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
 from ..model import FileInfo, FunctionInfo, ClassInfo, CallInfo, ClassType, FunctionType, Language as Lang

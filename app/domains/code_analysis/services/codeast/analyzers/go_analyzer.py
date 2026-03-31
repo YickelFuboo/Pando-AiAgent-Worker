@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from typing import List, Optional
+from typing import List,Optional,Set
 from tree_sitter import Language, Parser
 from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
@@ -43,6 +43,7 @@ class GoAnalyzer(LanguageAnalyzer):
         if self.parser is None:
             logging.error("Failed to initialize Go parser")
             raise RuntimeError("Failed to initialize Go parser. Please ensure tree-sitter-go is properly installed.")
+        self._go_module_path: Optional[str] = None
     
     async def analyze_file(self) -> Optional[FileInfo]:
         """分析Go文件"""
@@ -90,14 +91,19 @@ class GoAnalyzer(LanguageAnalyzer):
                     await visit_node(child)
             
             await visit_node(tree.root_node)
-            
+
+            imports = self.get_imports(content, tree)
+            cur_file_rel_path = normalize_path(os.path.relpath(self.file_path, self.base_path))
+            dep_paths = self._dependent_files_from_imports(imports, cur_file_rel_path)
+
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
+                file_path=cur_file_rel_path,
                 language=Lang.GO,
                 functions=functions,
                 classes=structs,
-                imports=self.get_imports(content, tree),                
+                imports=imports,
+                dependent_files=dep_paths,
             )
         
         except Exception as e:
@@ -135,13 +141,78 @@ class GoAnalyzer(LanguageAnalyzer):
                             import_path = child.text.decode('utf8').strip().strip('"')
                             if import_path and not import_path.startswith('_'):
                                 imports.append(import_path)
+                for child in node.children:
+                    visit_imports(child)
             
             visit_imports(tree.root_node)
-            return imports
+            return list(dict.fromkeys(imports))
             
         except Exception as e:
             logging.error(f"Error getting imports for Go file {self.file_path}: {str(e)}")
             return []
+
+    def _get_go_module_path(self) -> str:
+        if self._go_module_path is not None:
+            return self._go_module_path
+        mod_path = os.path.join(self.base_path, "go.mod")
+        try:
+            with open(mod_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if s.startswith("module "):
+                        self._go_module_path = s[len("module "):].strip()
+                        return self._go_module_path
+        except OSError:
+            pass
+        self._go_module_path = ""
+        return ""
+
+    def _dependent_files_from_imports(self, imports: List[str], cur_file_rel_path: str) -> List[str]:
+        """把 Go import 映射到本仓库内被依赖文件（FileInfo.dependent_files）。
+
+        当前策略（第1档/低档）：只按 import 包路径做“文件级静态依赖”推导。
+        - 仅解析本仓库内模块路径（go.mod module）下的 import
+        - 对包目录取同层所有 .go（排除 *_test.go）作为依赖
+        """
+        dependent_files: Set[str] = set()
+        module_path = self._get_go_module_path()
+        if not module_path:
+            return []
+
+        for imp in imports:
+            if not imp:
+                continue
+            imp = imp.strip()
+            if not imp:
+                continue
+
+            if imp == module_path:
+                rel_dir = ""
+            elif imp.startswith(module_path + "/"):
+                rel_dir = imp[len(module_path) + 1:]
+            else:
+                continue
+
+            abs_dir = os.path.join(self.base_path, rel_dir.replace("/", os.sep))
+            if not os.path.isdir(abs_dir):
+                continue
+
+            try:
+                for name in os.listdir(abs_dir):
+                    if not name.endswith(".go"):
+                        continue
+                    if name.endswith("_test.go"):
+                        continue
+                    abs_path = os.path.join(abs_dir, name)
+                    if not os.path.isfile(abs_path):
+                        continue
+                    rel = normalize_path(os.path.relpath(abs_path, self.base_path))
+                    if rel and rel != cur_file_rel_path:
+                        dependent_files.add(rel)
+            except OSError:
+                continue
+
+        return sorted(dependent_files)
         
     def _get_function_name(self, node) -> str:
         """获取函数名"""

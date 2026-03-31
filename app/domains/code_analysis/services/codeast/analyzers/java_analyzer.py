@@ -1,10 +1,10 @@
 import logging
 import os
-from typing import List, Optional
+from typing import List,Optional,Set
 import javalang
 from app.utils.common import normalize_path
 from .base import LanguageAnalyzer
-from ..model import FileInfo, FunctionInfo, ClassInfo, ClassType, FunctionType, Language as Lang
+from ..model import FileInfo,FunctionInfo,ClassInfo,ClassType,FunctionType,Language as Lang
 
 
 class JavaAnalyzer(LanguageAnalyzer):
@@ -24,20 +24,25 @@ class JavaAnalyzer(LanguageAnalyzer):
                 
             functions = []
             classes = []
+            cur_file_rel_path = normalize_path(os.path.relpath(self.file_path, self.base_path))
             
             # 分析Java类和方法
             for path, node in tree.filter(javalang.tree.ClassDeclaration):
                 class_node = await self._create_class_node(node, content)
                 if class_node:
                     classes.append(class_node)
+
+            imports = self.get_imports(content)
+            dep_paths = self._dependent_files_from_imports(imports, cur_file_rel_path)
             
             return FileInfo(
                 name=os.path.basename(self.file_path),
-                file_path=normalize_path(os.path.relpath(self.file_path, self.base_path)),
+                file_path=cur_file_rel_path,
                 language=Lang.JAVA,
                 functions=functions,
                 classes=classes,
-                imports=self.get_imports(content)
+                imports=imports,
+                dependent_files=dep_paths,
             )
 
         except Exception as e:
@@ -46,14 +51,99 @@ class JavaAnalyzer(LanguageAnalyzer):
         
     def get_imports(self, content: str) -> List[str]:
         """获取Java文件的导入依赖"""
-        imports = []
+        imports: List[str] = []
         try:
             tree = javalang.parse.parse(content)
             for path, node in tree.filter(javalang.tree.Import):
-                imports.append(node.path)
+                dotted = node.path
+                if getattr(node, "wildcard", False):
+                    dotted = f"{dotted}.*"
+                if dotted:
+                    imports.append(dotted)
         except:
             pass
-        return imports
+        return list(dict.fromkeys(imports))
+
+    def _dependent_files_from_imports(self, imports: List[str], cur_file_rel_path: str) -> List[str]:
+        """把 Java import 映射到本仓库内被依赖文件（FileInfo.dependent_files）。
+
+        当前策略（第1档/低档）：只按 import 语句做“文件级静态依赖”推导，不做符号级、也不追踪同包未 import 的类型。
+        """
+
+        dependent_files: Set[str] = set()
+
+        def add_if_exists(dotted_prefix: str) -> bool:
+            if not dotted_prefix:
+                return False
+            rel_base = dotted_prefix.replace(".", os.sep)
+            abs_path = os.path.join(self.base_path, f"{rel_base}.java")
+            if os.path.isfile(abs_path):
+                rel = normalize_path(os.path.relpath(abs_path, self.base_path))
+                if rel and rel != cur_file_rel_path:
+                    dependent_files.add(rel)
+                    return True
+            return False
+
+        def add_from_dotted_import(dotted: str) -> None:
+            # 允许处理“类名.内部类名/成员名”的情况：
+            # com.foo.Outer.Inner -> 先找 Inner.java，不存在则退回 Outer.java
+            parts = dotted.split(".")
+            # 最多向上回退 2 级，避免把无关包名当成类名
+            max_cut = min(2, len(parts) - 1)
+            for cut in range(0, max_cut + 1):
+                prefix_parts = parts[:-cut] if cut > 0 else parts
+                prefix = ".".join(prefix_parts)
+                found = add_if_exists(prefix)
+                # add_if_exists 已经做了存在性判断；若找到就直接结束
+                if found:
+                    break
+
+        def add_from_package_wildcard(package_dotted: str) -> None:
+            # 只有“包级通配符 import x.y.*;”能直接扩展为多个 .java 文件。
+            # 对于“static 通配符 import static x.y.Z.*;”，通常 dotted_prefix 能直接落到 Z.java。
+            # 因此先尝试当作类名解析，再不行才按包目录枚举同层 .java。
+            # 1) 优先尝试把 prefix 当作类名（兼容 static wildcard）
+            before_count = len(dependent_files)
+            add_from_dotted_import(package_dotted)
+            if len(dependent_files) > before_count:
+                return
+
+            abs_dir = os.path.join(self.base_path, package_dotted.replace(".", os.sep))
+            if not os.path.isdir(abs_dir):
+                return
+
+            for name in os.listdir(abs_dir):
+                if not name.endswith(".java"):
+                    continue
+                abs_path = os.path.join(abs_dir, name)
+                if not os.path.isfile(abs_path):
+                    continue
+                rel = normalize_path(os.path.relpath(abs_path, self.base_path))
+                if rel and rel != cur_file_rel_path:
+                    dependent_files.add(rel)
+
+        for imp in imports:
+            if not imp:
+                continue
+            imp = imp.strip()
+            if not imp:
+                continue
+
+            # 通配符：import x.y.*; 或 import static x.y.Z.*;
+            if imp.endswith(".*"):
+                pkg_or_class = imp[: -len(".*")]
+                add_from_package_wildcard(pkg_or_class)
+                continue
+            if imp.endswith("*"):
+                pkg_or_class = imp[: -len("*")]
+                add_from_package_wildcard(pkg_or_class)
+                continue
+
+            # 普通 import：import x.y.Z;
+            # 以及 static import：import static x.y.Z.member;
+            add_from_dotted_import(imp)
+
+        return sorted(dependent_files)
 
     async def _create_class_node(self, node, content: str) -> Optional[ClassInfo]:
         """创建类节点"""

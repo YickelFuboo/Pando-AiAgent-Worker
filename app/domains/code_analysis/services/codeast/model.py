@@ -45,6 +45,7 @@ class Language(str, Enum):
     GO = "go"
     CPP = "cpp"
     C = "c"
+    JAVASCRIPT = "javascript"
     UNKNOWN = "unknown"
 
 class RelationType:
