@@ -3,7 +3,7 @@ from fastapi import APIRouter,Body,HTTPException,status
 from app.domains.code_analysis.services.repo_analysis_service import RepoAnalysisService
 
 
-router = APIRouter(prefix="/repo-analysis", tags=["代码仓分析"])
+router = APIRouter(prefix="/repo-analysis")
 
 
 @router.post("/{repo_id}/start-analysis")

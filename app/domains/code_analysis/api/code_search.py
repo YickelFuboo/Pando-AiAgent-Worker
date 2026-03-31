@@ -5,7 +5,7 @@ from app.domains.code_analysis.services.code_search_service import CodeSearchSer
 from app.domains.code_analysis.services.codegraph.graph_search import CodeGraphSearch
 
 
-router = APIRouter(prefix="/code-search", tags=["代码检索"])
+router = APIRouter(prefix="/code-search")
 
 
 @router.post("/{repo_id}/similar-code")

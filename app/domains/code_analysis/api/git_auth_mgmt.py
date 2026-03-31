@@ -6,7 +6,7 @@ from app.domains.code_analysis.schemes.git_auth_mgmt import GitAuthResponse, Git
 from app.domains.code_analysis.services.repo_mgmt.git_auth_service import GitAuthService
 
 
-router = APIRouter(prefix="/git-auth",tags=["认证信息管理"])
+router = APIRouter(prefix="/git-auth")
 
 @router.post("/{provider}", response_model=GitAuthResponse)
 async def save_git_auth(
