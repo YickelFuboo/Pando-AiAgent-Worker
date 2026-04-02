@@ -1,9 +1,107 @@
 import json
 import logging
-from typing import Any,Dict,List
+from typing import Any,Dict,List,Optional
 from .base import BaseTool
 from .schemes import ToolResult,ToolSuccessResult,ToolErrorResult,ToolResultStatus
 from .truncation import Truncate
+from app.agents.tools.local.ask_question import AskQuestion
+from app.agents.tools.local.batch_tool import BatchTool
+from app.agents.tools.local.code.apply_patch import ApplyPatchTool
+from app.agents.tools.local.code.code_search import CodeDependenciesSearchTool,CodeRelatedFilesSearchTool,CodeSimilarSearchTool
+from app.agents.tools.local.code.code_shell import CodeShellTool
+from app.agents.tools.local.code.list_code_files import ListCodeFilesTool
+from app.agents.tools.local.code.lsp_tool import LspTool
+from app.agents.tools.local.cron import CronTool
+from app.agents.tools.local.dir_read import ReadDirTool
+from app.agents.tools.local.file_read import ReadFileTool
+from app.agents.tools.local.file_search import GlobTool,GrepTool
+from app.agents.tools.local.file_write import InsertFileTool,MultiReplaceTextTool,ReplaceFileTextTool,WriteFileTool
+from app.agents.tools.local.shell import ExecTool
+from app.agents.tools.local.spawn import SpawnTool
+from app.agents.tools.local.todo import TodoReadTool,TodoWriteTool
+from app.agents.tools.local.web import WebFetchTool,WebSearchTool
+
+
+def register_tools_by_config(
+    *,
+    config_json:Dict[str,Any],
+    tools_factory:"ToolsFactory",
+    agent_type:str,
+    session_id:str,
+    user_id:str,
+    channel_id:str,
+    channel_type:str,
+    subagent_manager:Optional[Any]=None,
+    params:Dict[str,Any],
+)->None:
+    # 解析配置文件中的工具权限
+    usable=set()
+    tools_policy=config_json.get("tools")
+    if isinstance(tools_policy,dict):
+        for tool_name,decision in tools_policy.items():
+            if str(decision).strip().lower()=="allow":
+                usable.add(str(tool_name))
+
+    # 根据 agent_type 和 params 初始化工具参数
+    is_code_agent=agent_type in {"CodeAnalysis","CodeAgent","CodingAgent"}
+    repo_id=str(params.get("repo_id") or "").strip() if is_code_agent else ""
+    tool_init_kwargs={"repo_id":repo_id,"isCodeAgent":is_code_agent}
+    tools_to_register:List[BaseTool]=[]
+
+    # 注册工具
+    if "ask_question" in usable:
+        tools_to_register.append(AskQuestion())
+    if "read_file" in usable:
+        tools_to_register.append(ReadFileTool(**tool_init_kwargs))
+    if "write_file" in usable:
+        tools_to_register.append(WriteFileTool(**tool_init_kwargs))
+    if "replace_file_text" in usable:
+        tools_to_register.append(ReplaceFileTextTool(**tool_init_kwargs))
+    if "insert_file" in usable:
+        tools_to_register.append(InsertFileTool(**tool_init_kwargs))
+    if "multi_replace_text" in usable:
+        tools_to_register.append(MultiReplaceTextTool(**tool_init_kwargs))
+    if "glob_search" in usable:
+        tools_to_register.append(GlobTool())
+    if "grep_search" in usable:
+        tools_to_register.append(GrepTool())
+    if "read_dir" in usable:
+        tools_to_register.append(ReadDirTool())
+    if "exec" in usable:
+        tools_to_register.append(ExecTool())
+
+    if "list_code_files" in usable:
+        tools_to_register.append(ListCodeFilesTool())
+    if "apply_patch" in usable:
+        tools_to_register.append(ApplyPatchTool(repo_id=repo_id))
+    if "code_similar_search" in usable:
+        tools_to_register.append(CodeSimilarSearchTool(repo_id=str(params.get("repo_id") or "")))
+    if "code_related_files_search" in usable:
+        tools_to_register.append(CodeRelatedFilesSearchTool(repo_id=str(params.get("repo_id") or "")))
+    if "code_dependencies_search" in usable:
+        tools_to_register.append(CodeDependenciesSearchTool(repo_id=str(params.get("repo_id") or "")))
+    if "lsp" in usable:
+        tools_to_register.append(LspTool(repo_id=repo_id))
+    if "code_shell" in usable:
+        tools_to_register.append(CodeShellTool())
+
+    if "todo_read" in usable:
+        tools_to_register.append(TodoReadTool(session_id=session_id))
+    if "todo_write" in usable:
+        tools_to_register.append(TodoWriteTool(session_id=session_id))
+    if "batch_tools" in usable:
+        tools_to_register.append(BatchTool(tools_factory=tools_factory))
+    if "web_search" in usable:
+        tools_to_register.append(WebSearchTool())
+    if "web_fetch" in usable:
+        tools_to_register.append(WebFetchTool())
+    if "cron" in usable:
+        tools_to_register.append(CronTool(session_id=session_id,user_id=user_id,agent_type=agent_type,channel_id=channel_id,channel_type=channel_type))
+    if "spawn" in usable and subagent_manager is not None:
+        tools_to_register.append(SpawnTool(subagent_manager))
+    if tools_to_register:
+        tools_factory.register_tools(*tools_to_register)
+
 
 TOOLS_CACHE_NAME = ("exec",)
 MAX_CACHE_SIZE = 256

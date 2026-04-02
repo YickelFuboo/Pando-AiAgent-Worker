@@ -7,16 +7,42 @@ from app.agents.bus.queues import MESSAGE_BUS
 from app.agents.bus.types import InboundMessage
 from app.agents.core.base import AgentState, ToolChoice, extract_stream_tool_calls
 from app.agents.sessions.compaction import SessionCompaction
-from app.agents.tools.factory import ToolsFactory
+from app.agents.tools.factory import ToolsFactory,register_tools_by_config
 from app.agents.sessions.message import Message, Role, ToolCall
 from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.infrastructure.llms.chat_models.schemes import TokenUsage
-from app.agents.tools.local.dir_read import ReadDirTool
-from app.agents.tools.local.file_read import ReadFileTool
-from app.agents.tools.local.file_write import InsertFileTool,ReplaceFileTextTool,WriteFileTool
-from app.agents.tools.local.shell import ExecTool
-from app.agents.tools.local.web import WebSearchTool, WebFetchTool
+
+
+SUBAGENT_TOOLS_CONFIG={
+    "tools":{
+        "ask_question":"deny",
+        "terminate":"deny",
+        "read_file":"allow",
+        "write_file":"allow",
+        "replace_file_text":"allow",
+        "insert_file":"allow",
+        "multi_replace_text":"deny",
+        "glob_search":"deny",
+        "grep_search":"deny",
+        "read_dir":"allow",
+        "exec":"allow",
+        "list_code_files":"deny",
+        "apply_patch":"deny",
+        "code_similar_search":"deny",
+        "code_related_files_search":"deny",
+        "code_dependencies_search":"deny",
+        "lsp":"deny",
+        "code_shell":"deny",
+        "todo_read":"deny",
+        "todo_write":"deny",
+        "batch_tools":"deny",
+        "web_search":"allow",
+        "web_fetch":"allow",
+        "cron":"deny",
+        "spawn":"deny",
+    }
+}
 
 
 class SubAgentManager(ABC):
@@ -157,16 +183,17 @@ class SubAgent(ABC):
             raise e
 
     def _register_tools(self) -> None:
-        """SubAgent 仅注册文件/执行/搜索等工具，不注册 SpawnTool（子 Agent 不可再派生子任务）。"""
-        self.available_tools.register_tools(
-            ReadFileTool(),
-            WriteFileTool(),
-            ReplaceFileTextTool(),
-            InsertFileTool(),
-            ReadDirTool(),
-            ExecTool(),
-            WebSearchTool(),
-            WebFetchTool()
+        """SubAgent 工具根据内置配置注册，不注册 SpawnTool。"""
+        register_tools_by_config(
+            config_json=SUBAGENT_TOOLS_CONFIG,
+            tools_factory=self.available_tools,
+            agent_type="SubAgent",
+            session_id=self.session_id,
+            user_id=self.user_id,
+            channel_id=self.channel_id,
+            channel_type=self.channel_type,
+            subagent_manager=None,
+            params=self.params,
         )
 
     def _build_subagent_prompt(self) -> str:

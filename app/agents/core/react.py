@@ -4,8 +4,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, WORKSPACE_DIR, extract_stream_tool_calls
-from app.agents.tools.base import BaseTool
-from app.agents.tools.factory import ToolsFactory
+from app.agents.tools.factory import ToolsFactory,register_tools_by_config
 from app.agents.sessions.message import Message, ToolCall, Function
 from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.sessions.compaction import SessionCompaction
@@ -14,23 +13,6 @@ from app.infrastructure.llms.chat_models.schemes import TokenUsage
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
 from app.agents.core.subagent import SubAgentManager
-from app.agents.tools.local.ask_question import AskQuestion
-from app.agents.tools.local.batch_tool import BatchTool
-from app.agents.tools.local.cron import CronTool
-from app.agents.tools.local.dir_read import ReadDirTool
-from app.agents.tools.local.file_read import ReadFileTool
-from app.agents.tools.local.file_write import InsertFileTool,MultiReplaceTextTool,ReplaceFileTextTool,WriteFileTool
-from app.agents.tools.local.file_search import GlobTool,GrepTool
-from app.agents.tools.local.shell import ExecTool
-from app.agents.tools.local.spawn import SpawnTool
-from app.agents.tools.local.terminate import Terminate
-from app.agents.tools.local.todo import TodoReadTool,TodoWriteTool
-from app.agents.tools.local.web import WebFetchTool, WebSearchTool
-from app.agents.tools.local.code.apply_patch import ApplyPatchTool
-from app.agents.tools.local.code.code_search import CodeDependenciesSearchTool,CodeRelatedFilesSearchTool,CodeSimilarSearchTool
-from app.agents.tools.local.code.code_shell import CodeShellTool
-from app.agents.tools.local.code.list_code_files import ListCodeFilesTool
-from app.agents.tools.local.code.lsp_tool import LspTool
 
 
 # MCP 配置：.agent/{agent_type}/mcp_servers.json
@@ -114,70 +96,18 @@ class ReActAgent(BaseAgent):
         except Exception as e:
             logging.warning("Failed to load usable tools config %s: %s", config_path, e)
             return
-        usable = set(raw.get("usable_tools") or [])
-        if not usable or not self.available_tools:
-            return
-        is_code_agent=self.agent_type in {"CodeAnalysis","CodeAgent","CodingAgent"}
-        repo_id=str(self.params.get("repo_id") or "").strip() if is_code_agent else ""
-        tool_init_kwargs={"repo_id":repo_id,"isCodeAgent":is_code_agent}
-
-        tools_to_register: List[BaseTool] = []
-        if "ask_question" in usable:
-            tools_to_register.append(AskQuestion())
-        #if "terminate" in usable:
-        #    tools_to_register.append(Terminate())
-        if "read_file" in usable:
-            tools_to_register.append(ReadFileTool(**tool_init_kwargs))
-        if "write_file" in usable:
-            tools_to_register.append(WriteFileTool(**tool_init_kwargs))
-        if "replace_file_text" in usable:
-            tools_to_register.append(ReplaceFileTextTool(**tool_init_kwargs))
-        if "insert_file" in usable:
-            tools_to_register.append(InsertFileTool(**tool_init_kwargs))
-        if "multi_replace_text" in usable:
-            tools_to_register.append(MultiReplaceTextTool(**tool_init_kwargs))
-
-        if "glob_search" in usable:
-            tools_to_register.append(GlobTool())
-        if "grep_search" in usable:
-            tools_to_register.append(GrepTool())
-        if "read_dir" in usable:
-            tools_to_register.append(ReadDirTool())
-        if "exec" in usable:
-            tools_to_register.append(ExecTool())
-
-        if "list_code_files" in usable:
-            tools_to_register.append(ListCodeFilesTool())
-        if "apply_patch" in usable:
-            tools_to_register.append(ApplyPatchTool(repo_id=repo_id))
-        if "code_similar_search" in usable:
-            tools_to_register.append(CodeSimilarSearchTool(repo_id=str(self.params.get("repo_id") or "")))
-        if "code_related_files_search" in usable:
-            tools_to_register.append(CodeRelatedFilesSearchTool(repo_id=str(self.params.get("repo_id") or "")))
-        if "code_dependencies_search" in usable:
-            tools_to_register.append(CodeDependenciesSearchTool(repo_id=str(self.params.get("repo_id") or "")))
-        if "lsp" in usable:
-            tools_to_register.append(LspTool(repo_id=repo_id))
-        if "code_shell" in usable:
-            tools_to_register.append(CodeShellTool())
-
-        if "todo_read" in usable:
-            tools_to_register.append(TodoReadTool(session_id=self.session_id))
-        if "todo_write" in usable:
-            tools_to_register.append(TodoWriteTool(session_id=self.session_id))
-        if "batch_tools" in usable:
-            tools_to_register.append(BatchTool(tools_factory=self.available_tools))
-        if "web_search" in usable:
-            tools_to_register.append(WebSearchTool())
-        if "web_fetch" in usable:
-            tools_to_register.append(WebFetchTool())
-        if "cron" in usable:
-            tools_to_register.append(CronTool(session_id=self.session_id, user_id=self.user_id, agent_type=self.agent_type, channel_id=self.channel_id, channel_type=self.channel_type))
-        if "spawn" in usable:
-            tools_to_register.append(SpawnTool(self.subagent_manager))
         
-        if tools_to_register:
-            self.available_tools.register_tools(*tools_to_register)
+        register_tools_by_config(
+            config_json=raw,
+            tools_factory=self.available_tools,
+            agent_type=self.agent_type,
+            session_id=self.session_id,
+            user_id=self.user_id,
+            channel_id=self.channel_id,
+            channel_type=self.channel_type,
+            subagent_manager=self.subagent_manager,
+            params=self.params,
+        )
 
     async def _register_mcp_tools(self) -> None:
         """从 .agent/{agent_type}/mcp_servers.json 加载配置，经连接池获取/复用 MCP，并将工具注册到 available_tools。"""
