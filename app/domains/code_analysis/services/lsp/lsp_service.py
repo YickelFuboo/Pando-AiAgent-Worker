@@ -271,13 +271,18 @@ class CodeLSPService:
         return merged
 
     @staticmethod
-    async def workspace_symbol(query:str)->List[Any]:
+    async def workspace_symbol(query:str,repo_id:str="")->List[Any]:
         """workspace/symbol；合并各 client 结果并做简单 kind 过滤。"""
         if CodeLSPService._lsp_off():
             return []
+        if not (repo_id or "").strip():
+            return []
+        root=await CodeLSPService._resolve_repo_root(repo_id)
+        if not root:
+            return []
 
         async with CodeLSPService._lock:
-            clients=list(CodeLSPService._clients.values())
+            clients=[c for c in CodeLSPService._clients.values() if c.root==root]
         merged:List[Any]=[]
         for c in clients:
             try:

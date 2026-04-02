@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
+from app.domains.code_analysis.services.lsp.lsp_service import CodeLSPService
 from ..base import BaseTool
 from ..schemes import ToolResult, ToolSuccessResult, ToolErrorResult
 
@@ -32,6 +33,24 @@ def _is_probably_binary(ext: str, size: int, head: bytes) -> bool:
 
 class ReadFileTool(BaseTool):
     """文件读取工具"""
+
+    def __init__(self,**kwargs:Any):
+        self.kwargs=kwargs
+
+    async def _warm_lsp(self, file_path:Path)->None:
+        if self.kwargs.get("isCodeAgent") is not True:
+            return
+        repo_id=str(self.kwargs.get("repo_id") or "").strip()
+        if not repo_id:
+            return
+        try:
+            target=str(file_path.resolve())
+            available=await CodeLSPService.has_clients(target,repo_id=repo_id)
+            if not available:
+                return
+            await CodeLSPService.touch_file(target, wait_for_diagnostics=False, repo_id=repo_id)
+        except Exception:
+            return
 
     @property
     def name(self) -> str:
@@ -166,6 +185,8 @@ Usage:
                 f"<truncated>{str(truncated).lower()}</truncated>",
                 f"<next_offset>{next_offset if truncated else ''}</next_offset>",
             ])
+            if self.kwargs.get("isCodeAgent") is True:
+                await self._warm_lsp(file_path)
             return ToolSuccessResult(output)
 
         except Exception as e:

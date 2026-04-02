@@ -14,14 +14,23 @@ from app.infrastructure.llms.chat_models.schemes import TokenUsage
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
 from app.agents.core.subagent import SubAgentManager
-from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool, ReleaseFileTextTool, InsertFileTool
-from app.agents.tools.local.dir_operator import ListDirTool
-from app.agents.tools.local.shell import ExecTool
-from app.agents.tools.local.web import WebSearchTool, WebFetchTool
-from app.agents.tools.local.cron import CronTool
 from app.agents.tools.local.ask_question import AskQuestion
-from app.agents.tools.local.terminate import Terminate
+from app.agents.tools.local.batch_tool import BatchTool
+from app.agents.tools.local.cron import CronTool
+from app.agents.tools.local.dir_read import ReadDirTool
+from app.agents.tools.local.file_read import ReadFileTool
+from app.agents.tools.local.file_write import InsertFileTool,MultiReplaceTextTool,ReplaceFileTextTool,WriteFileTool
+from app.agents.tools.local.file_search import GlobTool,GrepTool
+from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.spawn import SpawnTool
+from app.agents.tools.local.terminate import Terminate
+from app.agents.tools.local.todo import TodoReadTool,TodoWriteTool
+from app.agents.tools.local.web import WebFetchTool, WebSearchTool
+from app.agents.tools.local.code.apply_patch import ApplyPatchTool
+from app.agents.tools.local.code.code_search import CodeDependenciesSearchTool,CodeRelatedFilesSearchTool,CodeSimilarSearchTool
+from app.agents.tools.local.code.code_shell import CodeShellTool
+from app.agents.tools.local.code.list_code_files import ListCodeFilesTool
+from app.agents.tools.local.code.lsp_tool import LspTool
 
 
 # MCP 配置：.agent/{agent_type}/mcp_servers.json
@@ -108,24 +117,56 @@ class ReActAgent(BaseAgent):
         usable = set(raw.get("usable_tools") or [])
         if not usable or not self.available_tools:
             return
-        
+        is_code_agent=self.agent_type in {"CodeAnalysis","CodeAgent","CodingAgent"}
+        repo_id=str(self.params.get("repo_id") or "").strip() if is_code_agent else ""
+        tool_init_kwargs={"repo_id":repo_id,"isCodeAgent":is_code_agent}
+
         tools_to_register: List[BaseTool] = []
         if "ask_question" in usable:
             tools_to_register.append(AskQuestion())
         #if "terminate" in usable:
         #    tools_to_register.append(Terminate())
         if "read_file" in usable:
-            tools_to_register.append(ReadFileTool())
+            tools_to_register.append(ReadFileTool(**tool_init_kwargs))
         if "write_file" in usable:
-            tools_to_register.append(WriteFileTool())
-        if "release_file_text" in usable:
-            tools_to_register.append(ReleaseFileTextTool())
+            tools_to_register.append(WriteFileTool(**tool_init_kwargs))
+        if "replace_file_text" in usable:
+            tools_to_register.append(ReplaceFileTextTool(**tool_init_kwargs))
         if "insert_file" in usable:
-            tools_to_register.append(InsertFileTool())
-        if "list_dir" in usable:
-            tools_to_register.append(ListDirTool())
+            tools_to_register.append(InsertFileTool(**tool_init_kwargs))
+        if "multi_replace_text" in usable:
+            tools_to_register.append(MultiReplaceTextTool(**tool_init_kwargs))
+
+        if "glob_search" in usable:
+            tools_to_register.append(GlobTool())
+        if "grep_search" in usable:
+            tools_to_register.append(GrepTool())
+        if "read_dir" in usable:
+            tools_to_register.append(ReadDirTool())
         if "exec" in usable:
             tools_to_register.append(ExecTool())
+
+        if "list_code_files" in usable:
+            tools_to_register.append(ListCodeFilesTool())
+        if "apply_patch" in usable:
+            tools_to_register.append(ApplyPatchTool(repo_id=repo_id))
+        if "code_similar_search" in usable:
+            tools_to_register.append(CodeSimilarSearchTool(repo_id=str(self.params.get("repo_id") or "")))
+        if "code_related_files_search" in usable:
+            tools_to_register.append(CodeRelatedFilesSearchTool(repo_id=str(self.params.get("repo_id") or "")))
+        if "code_dependencies_search" in usable:
+            tools_to_register.append(CodeDependenciesSearchTool(repo_id=str(self.params.get("repo_id") or "")))
+        if "lsp" in usable:
+            tools_to_register.append(LspTool(repo_id=repo_id))
+        if "code_shell" in usable:
+            tools_to_register.append(CodeShellTool())
+
+        if "todo_read" in usable:
+            tools_to_register.append(TodoReadTool(session_id=self.session_id))
+        if "todo_write" in usable:
+            tools_to_register.append(TodoWriteTool(session_id=self.session_id))
+        if "batch_tools" in usable:
+            tools_to_register.append(BatchTool(tools_factory=self.available_tools))
         if "web_search" in usable:
             tools_to_register.append(WebSearchTool())
         if "web_fetch" in usable:
@@ -332,7 +373,7 @@ class ReActAgent(BaseAgent):
             raise ValueError(f"Unknown tool '{name}'")
             
         try:
-            args = toolcall.function.arguments
+            args = dict(toolcall.function.arguments or {})
             tool_result = await self.available_tools.execute(tool_name=name, tool_params=args)
             return (f"{tool_result.result}", getattr(tool_result, "metadata", None))
         except Exception as e:
@@ -348,7 +389,15 @@ class ReActAgent(BaseAgent):
         """Handle special tool execution and state changes"""
         name = toolcall.function.name
         if name == "ask_question":
-            await self.push_history_message_and_notify_user(Message.assistant_message(toolcall.function.arguments.get("question") or ""))
+            args = toolcall.function.arguments or {}
+            formatted = []  
+            q = ""
+            items = args.get("questions") or []
+            if items and isinstance(items, list):
+                text = (q or "").strip()
+                formatted.append(f"{text}")
+            q = "\n".join(formatted)  
+            await self.push_history_message_and_notify_user(Message.assistant_message(q or ""))
         #elif name == "terminate":
         #    await self.push_history_message_and_notify_user(Message.assistant_message(args.get("summary") or ""))
 

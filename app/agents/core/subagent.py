@@ -1,4 +1,3 @@
-import json
 import logging
 import uuid
 import asyncio
@@ -13,11 +12,11 @@ from app.agents.sessions.message import Message, Role, ToolCall
 from app.agents.sessions.session import Session
 from app.infrastructure.llms.chat_models.factory import llm_factory
 from app.infrastructure.llms.chat_models.schemes import TokenUsage
-from app.agents.tools.local.file_system import ReadFileTool, WriteFileTool
-from app.agents.tools.local.dir_operator import ListDirTool
+from app.agents.tools.local.dir_read import ReadDirTool
+from app.agents.tools.local.file_read import ReadFileTool
+from app.agents.tools.local.file_write import InsertFileTool,ReplaceFileTextTool,WriteFileTool
 from app.agents.tools.local.shell import ExecTool
 from app.agents.tools.local.web import WebSearchTool, WebFetchTool
-from app.agents.tools.local.file_system import ReleaseFileTextTool, InsertFileTool
 
 
 class SubAgentManager(ABC):
@@ -162,9 +161,9 @@ class SubAgent(ABC):
         self.available_tools.register_tools(
             ReadFileTool(),
             WriteFileTool(),
-            ReleaseFileTextTool(),
+            ReplaceFileTextTool(),
             InsertFileTool(),
-            ListDirTool(),
+            ReadDirTool(),
             ExecTool(),
             WebSearchTool(),
             WebFetchTool()
@@ -363,7 +362,7 @@ When you have completed the task, provide a clear summary of your findings or ac
             raise ValueError(f"Unknown tool '{name}'")
             
         try:
-            args = toolcall.function.arguments
+            args = dict(toolcall.function.arguments or {})
             tool_result = await self.available_tools.execute(tool_name=name, tool_params=args)
             return (f"{tool_result.result}", getattr(tool_result, "metadata", None))
         except Exception as e:

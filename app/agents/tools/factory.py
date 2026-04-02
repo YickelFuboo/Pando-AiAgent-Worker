@@ -30,6 +30,9 @@ class ToolsFactory:
     def has_tool(self, name: str) -> bool:
         return name in self._tools
 
+    def list_tool_names(self) -> List[str]:
+        return list(self._tools.keys())
+
     @property
     def has_spawn_tool(self) -> bool:
         """当前是否可委托子 Agent：由工具集合是否含 spawn 决定。"""

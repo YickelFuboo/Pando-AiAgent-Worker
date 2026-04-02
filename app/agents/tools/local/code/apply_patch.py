@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from app.agents.tools.base import BaseTool
 from app.agents.tools.schemes import ToolErrorResult, ToolResult, ToolSuccessResult
+from app.domains.code_analysis.services.lsp.lsp_service import CodeLSPService
 
 
 def trim_diff(diff: str) -> str:
@@ -84,22 +85,18 @@ def diff_line_counts(old_content: str, new_content: str) -> Tuple[int, int]:
     return additions, deletions
 
 
-def resolve_under_workspace(workspace: Path, rel_path: str) -> Path:
+def resolve_patch_abs_path(abs_or_rel_path: str) -> Path:
     """
-    将输入路径解析到 workspace 下，并阻止路径逃逸。
-    支持绝对路径与相对路径，最终返回绝对路径。
+    仅允许 absolute 路径。
+    - patch 中的 <path> / "*** Move to:" 都必须是绝对路径
     """
-    root = workspace.expanduser().resolve()
-    raw = (rel_path or "").strip()
+    raw = (abs_or_rel_path or "").strip()
     if not raw:
         raise ValueError("empty path")
     p = Path(raw)
-    full = p.resolve() if p.is_absolute() else (root / p).resolve()
-    try:
-        full.relative_to(root)
-    except ValueError:
-        raise ValueError(f"path escapes workspace: {rel_path}") from None
-    return full
+    if not p.is_absolute():
+        raise ValueError("absolute path is required")
+    return p.resolve()
 
 
 Hunk = Dict[str, Any]
@@ -459,8 +456,46 @@ class ApplyPatchTool(BaseTool):
     - 预计算 diff 与变更统计
     - 执行 add/update/move/delete 落盘
     """
-    def __init__(self, workspace_path: str = ""):
-        self._workspace = (workspace_path or "").strip()
+    def __init__(self,repo_id:str="",**kwargs:Any):
+        self._repo_id=(repo_id or "").strip()
+
+    async def _collect_changed_files_diagnostics(self,changed_files:List[str])->Dict[str,List[Dict[str,Any]]]:
+        if not self._repo_id:
+            return {}
+        unique_targets=list(dict.fromkeys(changed_files))
+        for target in unique_targets:
+            try:
+                available=await CodeLSPService.has_clients(target,repo_id=self._repo_id)
+                if not available:
+                    continue
+                await CodeLSPService.touch_file(target,wait_for_diagnostics=True,repo_id=self._repo_id)
+            except Exception:
+                continue
+        try:
+            all_diagnostics=await CodeLSPService.diagnostics()
+        except Exception:
+            return {}
+        normalized_targets={str(Path(p).resolve()) for p in unique_targets}
+        filtered:Dict[str,List[Dict[str,Any]]]={}
+        for file_path,items in (all_diagnostics or {}).items():
+            norm=str(Path(file_path).resolve())
+            if norm not in normalized_targets:
+                continue
+            only_errors=[x for x in (items or []) if int(x.get("severity",1))==1]
+            if only_errors:
+                filtered[norm]=only_errors
+        return filtered
+
+    @staticmethod
+    def _pretty_diagnostic(item:Dict[str,Any])->str:
+        severity_map={1:"ERROR",2:"WARN",3:"INFO",4:"HINT"}
+        severity=severity_map.get(int(item.get("severity",1)),"ERROR")
+        msg=str(item.get("message") or "").strip()
+        rng=item.get("range") or {}
+        start=(rng.get("start") or {}) if isinstance(rng,dict) else {}
+        line=int(start.get("line",0))+1
+        col=int(start.get("character",0))+1
+        return f"{severity} [{line}:{col}] {msg}"
 
     @property
     def name(self) -> str:
@@ -501,6 +536,7 @@ It is important to remember:
 
 - You must include a header with your intended action (Add/Delete/Update)
 - You must prefix new lines with `+` even when creating a new file
+- Your patch header <path> and "*** Move to:" path must be absolute paths
 """
 
     @property
@@ -524,9 +560,6 @@ It is important to remember:
         try:
             if not patchText:
                 return ToolErrorResult("patchText is required")
-            if not self._workspace:
-                return ToolErrorResult("apply_patch: workspace_path is not configured")
-            ws_root = Path(self._workspace).expanduser().resolve()
             try:
                 parsed = parse_patch(patchText)
             except Exception as e:
@@ -549,7 +582,7 @@ It is important to remember:
                 htype = hunk.get("type")
                 rel = hunk.get("path", "")
                 try:
-                    file_path = resolve_under_workspace(ws_root, rel)
+                    file_path = resolve_patch_abs_path(rel)
                 except ValueError as e:
                     return ToolErrorResult(f"apply_patch verification failed: {e}")
                 if htype == "add":
@@ -608,7 +641,7 @@ It is important to remember:
                     mp = hunk.get("move_path")
                     if mp:
                         try:
-                            move_path = resolve_under_workspace(ws_root, mp)
+                            move_path = resolve_patch_abs_path(mp)
                         except ValueError as e:
                             return ToolErrorResult(
                                 f"apply_patch verification failed: {e}"
@@ -658,9 +691,7 @@ It is important to remember:
             files_out: List[Dict[str, Any]] = []
             for change in file_changes:
                 target = change.get("movePath") or change["filePath"]
-                rel_disp = str(Path(target).resolve().relative_to(ws_root)).replace(
-                    "\\", "/"
-                )
+                rel_disp = str(Path(target).resolve()).replace("\\", "/")
                 entry: Dict[str, Any] = {
                     "filePath": change["filePath"],
                     "relativePath": rel_disp,
@@ -698,28 +729,38 @@ It is important to remember:
                 if edited:
                     logging.debug("apply_patch edited %s", edited)
             summary_lines = []
+            changed_files_for_lsp:List[str]=[]
             for change in file_changes:
                 ctype = change["type"]
                 if ctype == "add":
-                    rp = str(
-                        Path(change["filePath"]).resolve().relative_to(ws_root)
-                    ).replace("\\", "/")
+                    rp = str(Path(change["filePath"]).resolve()).replace("\\", "/")
                     summary_lines.append(f"A {rp}")
+                    changed_files_for_lsp.append(str(Path(change["filePath"]).resolve()))
                 elif ctype == "delete":
-                    rp = str(
-                        Path(change["filePath"]).resolve().relative_to(ws_root)
-                    ).replace("\\", "/")
+                    rp = str(Path(change["filePath"]).resolve()).replace("\\", "/")
                     summary_lines.append(f"D {rp}")
                 else:
                     tgt = change.get("movePath") or change["filePath"]
-                    rp = str(Path(tgt).resolve().relative_to(ws_root)).replace("\\", "/")
+                    rp = str(Path(tgt).resolve()).replace("\\", "/")
                     summary_lines.append(f"M {rp}")
+                    changed_files_for_lsp.append(str(Path(tgt).resolve()))
             output = (
                 "Success. Updated the following files:\n" + "\n".join(summary_lines)
             )
+            diagnostics=await self._collect_changed_files_diagnostics(changed_files_for_lsp)
+            if diagnostics:
+                output += "\n\nLSP errors detected in changed files, please fix:"
+                for file_path,items in diagnostics.items():
+                    output += f"\n\n<diagnostics file=\"{file_path}\">"
+                    limited=items[:20]
+                    for item in limited:
+                        output += f"\n{self._pretty_diagnostic(item)}"
+                    if len(items)>20:
+                        output += f"\n... and {len(items)-20} more"
+                    output += "\n</diagnostics>"
             return ToolSuccessResult(
                 output,
-                metadata={"diff": total_diff, "files": files_out},
+                metadata={"diff": total_diff, "files": files_out, "diagnostics": diagnostics},
             )
         except Exception as e:
             logging.error("apply_patch execution error: %s", e)

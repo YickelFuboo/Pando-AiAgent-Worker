@@ -164,9 +164,10 @@ Usage:
     async def execute(self,**kwargs:Any)->ToolResult:
         if not self._session_id:
             return ToolErrorResult("todo_read: session_id is required")
-        p=_todo_file(self._session_id)
-        todos=_load(p)
-        remaining=len([t for t in todos if t.get("status")!="completed"])
+
+        p = _todo_file(self._session_id)
+        todos = _load(p)
+        remaining = len([t for t in todos if t.get("status")!="completed"])
         output="\n".join([
             f"<path>{p}</path>",
             f"<remaining>{remaining}</remaining>",

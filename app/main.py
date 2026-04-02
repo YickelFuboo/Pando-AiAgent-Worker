@@ -29,6 +29,7 @@ from app.domains.code_analysis.api.git_auth_mgmt import router as git_auth_route
 from app.domains.code_analysis.api.code_search import router as code_search_router
 from app.domains.code_analysis.api.code_analysis import router as code_analysis_router
 from app.domains.code_analysis.services.file_analysis_service import FileAnalysisService
+from app.domains.code_analysis.services.lsp.lsp_service import CodeLSPService
 
 
 # 创建FastAPI应用
@@ -144,6 +145,8 @@ async def shutdown_event():
 
     await FileAnalysisService.stop_global_scheduler()
     logging.info("代码分析全局调度已停止")
+    await CodeLSPService.close_all()
+    logging.info("代码分析LSP连接已停止")
 
     try:
         # 关闭数据库连接

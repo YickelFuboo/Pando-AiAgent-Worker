@@ -1,11 +1,10 @@
-import asyncio
 import difflib
 import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.domains.code_analysis.services.lsp.lsp_service import CodeAnalysisLSPService
+from app.domains.code_analysis.services.lsp.lsp_service import CodeLSPService
 
 from ..base import BaseTool
 from ..schemes import ToolResult, ToolSuccessResult, ToolErrorResult
@@ -50,8 +49,58 @@ def _two_files_patch(old_path: str, new_path: str, old_content: str, new_content
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+def _is_code_agent_enabled(kwargs:Dict[str,Any])->bool:
+    return kwargs.get("isCodeAgent") is True
+
+
+def _pretty_diagnostic(item:Dict[str,Any])->str:
+    severity_map={1:"ERROR",2:"WARN",3:"INFO",4:"HINT"}
+    severity=severity_map.get(int(item.get("severity",1)),"ERROR")
+    msg=str(item.get("message") or "").strip()
+    rng=item.get("range") or {}
+    start=(rng.get("start") or {}) if isinstance(rng,dict) else {}
+    line=int(start.get("line",0))+1
+    col=int(start.get("character",0))+1
+    return f"{severity} [{line}:{col}] {msg}"
+
+
+def _append_lsp_diagnostics(output:str,file_path:Path,diagnostics:Dict[str,List[Dict[str,Any]]])->str:
+    current=str(file_path.resolve())
+    current_items=[x for x in (diagnostics.get(current) or []) if int(x.get("severity",1))==1]
+    if not current_items:
+        return output
+    limited=current_items[:20]
+    output += f"\n\nLSP errors detected in this file, please fix:\n<diagnostics file=\"{current}\">"
+    for item in limited:
+        output += f"\n{_pretty_diagnostic(item)}"
+    if len(current_items)>20:
+        output += f"\n... and {len(current_items)-20} more"
+    output += "\n</diagnostics>"
+    return output
+
+
+async def _touch_lsp_after_write(file_path:Path,kwargs:Dict[str,Any])->Dict[str,List[Dict[str,Any]]]:
+    if not _is_code_agent_enabled(kwargs):
+        return {}
+    repo_id=str(kwargs.get("repo_id") or "").strip()
+    if not repo_id:
+        return {}
+    try:
+        target=str(file_path.resolve())
+        available=await CodeLSPService.has_clients(target,repo_id=repo_id)
+        if not available:
+            return {}
+        await CodeLSPService.touch_file(target,wait_for_diagnostics=True,repo_id=repo_id)
+        return await CodeLSPService.diagnostics(target)
+    except Exception:
+        return {}
+
+
 class WriteFileTool(BaseTool):
     """Write content to a file."""
+    def __init__(self,**kwargs:Any):
+        self.kwargs=kwargs
+
     @property
     def name(self) -> str:
         return "write_file"   
@@ -134,6 +183,9 @@ Usage:
                 diff,
                 "</diff>",
             ])
+            if _is_code_agent_enabled(self.kwargs):
+                diagnostics=await _touch_lsp_after_write(file_path,self.kwargs)
+                output=_append_lsp_diagnostics(output,file_path,diagnostics)
             return ToolSuccessResult(output)
             
         except Exception as e:
@@ -142,6 +194,9 @@ Usage:
 
 class ReplaceFileTextTool(BaseTool):
     """Replace text in a file."""
+    def __init__(self,**kwargs:Any):
+        self.kwargs=kwargs
+
     @property
     def name(self) -> str:
         return "replace_file_text"
@@ -259,6 +314,9 @@ Usage:
                 diff,
                 "</diff>",
             ])
+            if _is_code_agent_enabled(self.kwargs):
+                diagnostics=await _touch_lsp_after_write(file_path,self.kwargs)
+                output=_append_lsp_diagnostics(output,file_path,diagnostics)
             return ToolSuccessResult(output)
         except PermissionError as e:
             logging.error("Permission error: path=%r, error=%s", path, e)
@@ -292,6 +350,9 @@ Usage:
 
 class MultiReplaceTextTool(BaseTool):
     """Apply multiple replace_file_text operations sequentially."""
+    def __init__(self,**kwargs:Any):
+        self.kwargs=kwargs
+
     @property
     def name(self) -> str:
         return "multi_replace_text"
@@ -395,6 +456,9 @@ Usage:
                 diff,
                 "</diff>",
             ])
+            if _is_code_agent_enabled(self.kwargs):
+                diagnostics=await _touch_lsp_after_write(file_path,self.kwargs)
+                output=_append_lsp_diagnostics(output,file_path,diagnostics)
             return ToolSuccessResult(output, metadata={"results": step_results})
         except Exception as e:
             logging.error("Failed to execute multi_replace_text: path=%r, error=%s", path, e)
@@ -433,6 +497,9 @@ Usage:
 
 class InsertFileTool(BaseTool):
     """Insert content into a file."""
+    def __init__(self,**kwargs:Any):
+        self.kwargs=kwargs
+
     @property
     def name(self) -> str:
         return "insert_file"   
@@ -516,6 +583,9 @@ Usage:
                 diff,
                 "</diff>",
             ])
+            if _is_code_agent_enabled(self.kwargs):
+                diagnostics=await _touch_lsp_after_write(file_path,self.kwargs)
+                output=_append_lsp_diagnostics(output,file_path,diagnostics)
             return ToolSuccessResult(output)
             
         except Exception as e:
