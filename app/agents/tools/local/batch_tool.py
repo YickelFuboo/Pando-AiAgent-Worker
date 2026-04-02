@@ -1,9 +1,11 @@
 import asyncio
 import json
-from typing import Any,Dict,List,Optional
+from typing import Any,Dict,List,Optional,TYPE_CHECKING
 from app.agents.tools.base import BaseTool
-from app.agents.tools.factory import ToolsFactory
 from app.agents.tools.schemes import ToolErrorResult,ToolResult,ToolResultStatus,ToolSuccessResult
+if TYPE_CHECKING:
+    from app.agents.tools.factory import ToolsFactory
+
 
 MAX_BATCH_SIZE=25
 DISALLOWED_TOOLS={"batch_tools","apply_patch"}
@@ -11,7 +13,7 @@ FILTERED_FROM_SUGGESTIONS={"invalid","apply_patch","batch_tools"}
 
 
 class BatchTool(BaseTool):
-    def __init__(self,tools_factory:Optional[ToolsFactory]=None):
+    def __init__(self,tools_factory:Optional["ToolsFactory"]=None):
         self._tools_factory = tools_factory
 
     @property

@@ -22,9 +22,9 @@ SUBAGENT_TOOLS_CONFIG={
         "write_file":"allow",
         "replace_file_text":"allow",
         "insert_file":"allow",
-        "multi_replace_text":"deny",
-        "glob_search":"deny",
-        "grep_search":"deny",
+        "multi_replace_text":"allow",
+        "glob_search":"allow",
+        "grep_search":"allow",
         "read_dir":"allow",
         "exec":"allow",
         "list_code_files":"deny",
@@ -41,7 +41,7 @@ SUBAGENT_TOOLS_CONFIG={
         "web_fetch":"allow",
         "cron":"deny",
         "spawn":"deny",
-    }
+    },
 }
 
 
@@ -55,7 +55,7 @@ class SubAgentManager(ABC):
         session_id: str,
         channel_type: str,
         channel_id: str,
-        workspace_path: str,
+        agent_workspace: str,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
         temperature: Optional[float] = None,
@@ -68,7 +68,7 @@ class SubAgentManager(ABC):
         self.session_id = session_id
         self.channel_type = channel_type
         self.channel_id = channel_id
-        self.workspace_path = workspace_path
+        self.agent_workspace = agent_workspace
 
         # 模型信息
         self.llm_provider = llm_provider or ""
@@ -96,7 +96,7 @@ class SubAgentManager(ABC):
             session_id=self.session_id,
             channel_type=self.channel_type,
             channel_id=self.channel_id,
-            workspace_path=self.workspace_path,
+            agent_workspace=self.agent_workspace,
             parent_agent_type=self.parent_agent_type,
             llm_provider=self.llm_provider,
             llm_model=self.llm_model,
@@ -123,7 +123,7 @@ class SubAgent(ABC):
         session_id: str,
         channel_type: str,
         channel_id: str,
-        workspace_path: str,
+        agent_workspace: str,
         parent_agent_type: str,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
@@ -136,7 +136,7 @@ class SubAgent(ABC):
         self.session_id = session_id
         self.channel_type = channel_type
         self.channel_id = channel_id
-        self.workspace_path = workspace_path
+        self.agent_workspace = agent_workspace
         self.parent_agent_type = parent_agent_type
 
         # 提示词信息
@@ -158,7 +158,7 @@ class SubAgent(ABC):
         self._max_duplicate_steps = 2   # 最大重复次数，用于检验当前项agent是否挂死
 
         # 工具信息
-        self.available_tools = ToolsFactory(workspace_path=self.workspace_path)
+        self.available_tools = ToolsFactory(agent_workspace=self.agent_workspace)
         self.tool_choices = ToolChoice.AUTO
         self._register_tools()
         self.history_messages: List[Message] = []
@@ -215,6 +215,8 @@ You are a subagent spawned by the main agent to complete a specific task.
 2. Your final response will be reported back to the main agent
 3. Do not initiate conversations or take on side tasks
 4. Be concise but informative in your findings
+5. Prefer tool use over speculation; verify key claims with concrete evidence
+6. If blocked, state what failed, why, and the smallest next action needed
 
 ## What You Can Do
 - Read and write files in the workspace
@@ -227,10 +229,15 @@ You are a subagent spawned by the main agent to complete a specific task.
 - Spawn other subagents
 - Access the main agent's conversation history
 
-## Workspace
-Your workspace is at: {self.workspace_path}
+## Output Contract
+- Start with outcome status: Completed / Partially Completed / Blocked
+- Then include: key findings, files/commands touched, and unresolved risks
+- Keep raw logs minimal; summarize first and include only necessary details
 
-When you have completed the task, provide a clear summary of your findings or actions."""
+## Agent Workspace
+Your agent workspace is at: {self.agent_workspace_path}
+
+When done, return a structured, evidence-based summary aligned with the Output Contract."""
 
     def handle_stuck_state(self):
         """Handle stuck state by adding a prompt to change strategy"""

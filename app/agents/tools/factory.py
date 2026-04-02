@@ -115,12 +115,12 @@ def _cache_key(tool_name: str, tool_params: Dict[str, Any]) -> tuple[str, str]:
 
 class ToolsFactory:
     """工具市场管理器；超长输出截断时的 hint 根据是否可委托子 Agent（当前是否注册 spawn）选择不同提示。"""
-    def __init__(self, *tools: BaseTool, workspace_path: str = ""):
+    def __init__(self, *tools: BaseTool, agent_workspace: str = ""):
         self._tools: Dict[str, BaseTool] = {tool.name: tool for tool in tools}
         self._cacheable: set[str] = set(TOOLS_CACHE_NAME)
         self._max_cache_size = MAX_CACHE_SIZE
         self._result_cache: Dict[tuple[str, str], ToolResult] = {}
-        self.workspace_path = workspace_path
+        self._agent_workspace = agent_workspace
 
     def get_tool(self, name: str) -> BaseTool:
         return self._tools.get(name)
@@ -226,11 +226,11 @@ class ToolsFactory:
             result = await tool.execute(**tool_params)
 
             # 仅对成功结果做超长截断，统一在 Factory 处理；工具无需自行截断
-            if result.status == ToolResultStatus.EXECUTE_SUCCESS and self.workspace_path:
+            if result.status == ToolResultStatus.EXECUTE_SUCCESS and self._agent_workspace:
                 raw = f"{result.result}"
                 truncated = Truncate.output(
                     raw,
-                    self.workspace_path,
+                    self._agent_workspace,
                     has_task_tool=self.has_spawn_tool,
                 )
                 if truncated.truncated and truncated.output_path:

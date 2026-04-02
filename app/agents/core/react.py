@@ -3,7 +3,7 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
-from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, WORKSPACE_DIR, extract_stream_tool_calls
+from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, AGENT_WORKSPACE_DIR, extract_stream_tool_calls
 from app.agents.tools.factory import ToolsFactory,register_tools_by_config
 from app.agents.sessions.message import Message, ToolCall, Function
 from app.agents.sessions.manager import SESSION_MANAGER
@@ -61,9 +61,9 @@ class ReActAgent(BaseAgent):
 
         # 设置工作空间路径
         if agent_type == "AiAssistant":
-            self.workspace_path = str(WORKSPACE_DIR / self.user_id / self.agent_type)
+            self.agent_workspace = str(AGENT_WORKSPACE_DIR / self.user_id / self.agent_type)
         else:
-            self.workspace_path = str(WORKSPACE_DIR / "default")
+            self.agent_workspace = str(AGENT_WORKSPACE_DIR / "default")
 
         # 子Agent管理器
         self.subagent_manager = SubAgentManager(
@@ -72,14 +72,14 @@ class ReActAgent(BaseAgent):
             session_id=session_id,
             channel_type=channel_type,
             channel_id=channel_id,
-            workspace_path=self.workspace_path,
+            agent_workspace=self.agent_workspace,
             llm_provider=self.llm_provider,
             llm_model=self.llm_model,
             temperature=self.temperature,
         )
 
         # 工具信息
-        self.available_tools = ToolsFactory(workspace_path=self.workspace_path)
+        self.available_tools = ToolsFactory(agent_workspace=self.agent_workspace)
         self.tool_choices = ToolChoice.AUTO
         self.special_tool_names: List[str] = ["ask_question", "terminate"]
         self._register_tools()
@@ -155,17 +155,21 @@ class ReActAgent(BaseAgent):
 
         llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
         context_builder = ContextBuilder(
-            self.session_id, self.workspace_path, self.agent_path, 
+            session_id=self.session_id, 
             agent_type=self.agent_type,
+            agent_path=self.agent_path,
+            agent_workspace=self.agent_workspace,
             agent_description=self.description,
             params=self.params,
         )
         memory_manager = MemoryManager(
-            self.session_id, self.workspace_path, self.agent_path,
+            session_id=self.session_id, 
             agent_type=self.agent_type,
+            agent_path=self.agent_path,
+            agent_workspace=self.agent_workspace,
             agent_description=self.description,
             llm_provider=self.llm_provider,
-            llm_model=self.llm_model,
+            llm_model=self.llm_model
         )
         try:
             # 连接并注册 MCP 工具

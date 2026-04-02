@@ -16,13 +16,12 @@ class SpawnTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Spawn a subagent to handle a well-defined subtask in the background. "
-            "Use this for tasks that are long-running, tool-intensive, or data-heavy, where the detailed process "
-            "does not need to stay in the main agent's context. Typical (but not exclusive) examples include: "
-            "summarizing multiple files or a large directory, scanning logs or search results and extracting only "
-            "key findings, or running a multi-step investigation (probe environment, run several commands, then summarize). "
-            "The subagent should perform detailed work with its own tools and return a short, structured summary "
-            "instead of raw full content."
+            "Spawn a subagent for a focused background subtask and return a concise result. "
+            "Use this when work is long-running, tool-intensive, or data-heavy, and the detailed process does not need to stay in the main context. "
+            "Typical examples include summarizing many files, scanning logs or search results for key findings, or running a multi-step investigation and reporting conclusions. "
+            "Do not use spawn for tiny one-step actions or tasks that require frequent back-and-forth coordination with the main agent. "
+            "The subagent works with its own configured tools and returns distilled findings rather than full intermediate output. "
+            "Write `task` as clear scope + expected output (goal, boundaries, and desired result format), not raw pasted data."
         )
     
     @property

@@ -61,7 +61,7 @@ class ToolChoice(str, Enum):
 
 # 当前文件所在目录（各技能为子目录，如 memory/SKILL.md）
 AGENT_DIR = Path(PROJECT_BASE_DIR) / ".agent"
-WORKSPACE_DIR = Path(PROJECT_BASE_DIR) / "data" / ".workspace"
+AGENT_WORKSPACE_DIR = Path(PROJECT_BASE_DIR) / "data" / ".agent_workspace"
 
 class BaseAgent(ABC):
     """Base Agent class

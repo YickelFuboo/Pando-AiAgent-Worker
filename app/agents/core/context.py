@@ -22,21 +22,23 @@ class ContextBuilder:
     def __init__(
         self,
         session_id: str,
-        workspace_path: str,
-        agent_path: str,
         agent_type: str,
+        agent_path: str,
+        agent_workspace: str,
         agent_description: str = "",
         params: Optional[dict[str, Any]] = None,
     ):
         self.session_id = session_id
         self.agent_path = agent_path
-        self.workspace_path = workspace_path
+        self.agent_workspace_path = agent_workspace
         self.params = dict(params) if params else {}
-        self.skills_manager = SkillsManager(workspace_path, agent_path)
+        self.skills_manager = SkillsManager(agent_path, agent_workspace)
         self.memory_manager = MemoryManager(
-            session_id, workspace_path, agent_path,
+            session_id=session_id, 
             agent_type=agent_type,
-            agent_description=agent_description,
+            agent_path=agent_path,
+            agent_workspace=agent_workspace,
+            agent_description=agent_description
         )
     
     async def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
@@ -52,7 +54,7 @@ class ContextBuilder:
 
         self.params.update({
             "runtime": runtime,
-            "workspace_path": str(Path(self.workspace_path).expanduser().resolve()),
+            "agent_workspace": str(Path(self.agent_workspace).expanduser().resolve()),
         })  
 
         # 1. 构造Agent类型对应的引导文件（从 .agent/agent_type/prompt 目录读）
