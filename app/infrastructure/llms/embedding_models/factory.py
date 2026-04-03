@@ -7,8 +7,6 @@ from .bedrock_embed import BedrockEmbed
 from .cohere_embed import CoHereEmbed
 from .gemini_embed import GeminiEmbed
 from .huggingface_embed import HuggingFaceEmbed
-from .jina_embed import JinaEmbed
-from .localai_embed import LocalAIEmbed
 from .mistral_embed import MistralEmbed
 from .nvidia_embed import NvidiaEmbed
 from .ollama_embed import OllamaEmbed
@@ -16,7 +14,6 @@ from .openai_embed import OpenAIEmbed
 from .qwen_embed import QWenEmbed
 from .siliconflow_embed import SILICONFLOWEmbed
 from .voyage_embed import VoyageEmbed
-from .xinference_embed import XinferenceEmbed
 from .zhipu_embed import ZhipuEmbed
 
 
@@ -28,19 +25,17 @@ class EmbeddingModelFactory(BaseModelFactory[BaseEmbedding]):
         return {
             "baai": BAAIEmbedding,
             "openai": OpenAIEmbed,
+            "azure": OpenAIEmbed,
+            "baichuan": OpenAIEmbed,
+            "xinference": OpenAIEmbed,
             "qwen": QWenEmbed,
             "zhipu": ZhipuEmbed,
             "ollama": OllamaEmbed,
-            "azure": OpenAIEmbed,
-            "baichuan": OpenAIEmbed,
-            "jina": JinaEmbed,
             "cohere": CoHereEmbed,
             "siliconflow": SILICONFLOWEmbed,
-            "localai": LocalAIEmbed,
             "bedrock": BedrockEmbed,
             "gemini": GeminiEmbed,
             "nvidia": NvidiaEmbed,
-            "xinference": XinferenceEmbed,
             "mistral": MistralEmbed,
             "baidu_yiyan": BaiduYiyanEmbed,
             "voyage": VoyageEmbed,

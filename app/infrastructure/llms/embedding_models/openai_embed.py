@@ -3,6 +3,7 @@ import numpy as np
 import json
 import logging
 import asyncio
+from urllib.parse import urljoin
 from openai import AsyncOpenAI
 from openai.lib.azure import AsyncAzureOpenAI
 from .base import BaseEmbedding, CONNECTION_TIMEOUT, MAX_RETRY_ATTEMPTS
@@ -43,10 +44,16 @@ class OpenAIEmbed(BaseEmbedding):
                 timeout=CONNECTION_TIMEOUT,
                 max_retries=MAX_RETRY_ATTEMPTS
             )
+        elif model_provider == "xinference":
+            # 确保base_url以/v1结尾
+            base_url = urljoin(base_url, "v1")
+            # 创建OpenAI兼容客户端
+            self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         else:
             raise ValueError(f"Unsupported model provider: {model_provider}")
 
         super().__init__(api_key, model_provider, model_name, base_url, **kwargs)
+        self._truncate_embed_inputs = model_provider in ("openai", "baichuan", "azure")
 
 
 
@@ -62,7 +69,8 @@ class OpenAIEmbed(BaseEmbedding):
         """
         # OpenAI要求批次大小<=16
         batch_size = 16
-        texts = [truncate(t, 8191) for t in texts]
+        if self._truncate_embed_inputs:
+            texts = [truncate(t, 8191) for t in texts]
         ress = []
 
         total_tokens = 0
@@ -70,7 +78,10 @@ class OpenAIEmbed(BaseEmbedding):
             # 重试逻辑
             for attempt in range(MAX_RETRY_ATTEMPTS):
                 try:
-                    res = await self.client.embeddings.create(input=texts[i : i + batch_size], model=self.model_name)
+                    res = await self.client.embeddings.create(
+                        input=texts[i : i + batch_size], 
+                        model=self.model_name
+                    )
                     ress.extend([d.embedding for d in res.data])
                     total_tokens += self._total_token_count(res)
                     break  # 成功则跳出重试循环
@@ -97,10 +108,15 @@ class OpenAIEmbed(BaseEmbedding):
         Returns:
             Tuple[np.ndarray, int]: (嵌入向量, token总数)
         """
+        if self._truncate_embed_inputs:
+            text = truncate(text, 8191)
         # 重试逻辑
         for attempt in range(MAX_RETRY_ATTEMPTS):
             try:
-                res = await self.client.embeddings.create(input=[truncate(text, 8191)], model=self.model_name)
+                res = await self.client.embeddings.create(
+                    input=text, 
+                    model=self.model_name
+                )
                 return np.array(res.data[0].embedding), self._total_token_count(res)
                 
             except Exception as e:

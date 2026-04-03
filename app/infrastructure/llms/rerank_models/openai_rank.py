@@ -43,7 +43,7 @@ class OpenAIRank(BaseRank):
         Returns:
             Tuple[np.ndarray, int]: (相似度分数数组, token数量)
         """
-        # 截断文本到500字符
+        # 截断到 500 tokens（utils.truncate 按 tiktoken 计）
         texts = [truncate(t, 500) for t in texts]
         
         data = {    
