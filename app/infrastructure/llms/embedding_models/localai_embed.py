@@ -4,19 +4,20 @@ import numpy as np
 import asyncio
 import logging
 from openai import AsyncOpenAI
-from app.infrastructure.llms.embedding_models.base import BaseEmbedding, MAX_RETRY_ATTEMPTS
-from app.infrastructure.llms.utils import truncate
+from .base import BaseEmbedding, MAX_RETRY_ATTEMPTS
+from ..utils import truncate
 
 
 class LocalAIEmbed(BaseEmbedding):
     """LocalAI嵌入模型实现"""
     
-    def __init__(self, api_key: str, model_name: str, base_url: str = None, **kwargs):
+    def __init__(self, api_key: str, model_provider: str, model_name: str, base_url: str = None, **kwargs):
         """
         初始化LocalAI嵌入模型
         
         Args:
             api_key (str): API密钥（LocalAI通常使用"empty"）
+            model_provider (str): 模型提供商
             model_name (str): 模型名称
             base_url (str): LocalAI服务的基础URL
         """
@@ -26,7 +27,7 @@ class LocalAIEmbed(BaseEmbedding):
         # 确保base_url以/v1结尾
         base_url = urljoin(base_url, "v1")
         
-        super().__init__(api_key, model_name, base_url, **kwargs)
+        super().__init__(api_key, model_provider, model_name, base_url, **kwargs)
         
         # 处理模型名称，移除可能的"___"分隔符
         self.model_name = model_name.split("___")[0]

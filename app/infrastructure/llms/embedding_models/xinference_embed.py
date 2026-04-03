@@ -4,7 +4,7 @@ import numpy as np
 import asyncio
 import logging
 from openai import AsyncOpenAI
-from app.infrastructure.llms.embedding_models.base import BaseEmbedding, MAX_RETRY_ATTEMPTS
+from .base import BaseEmbedding, MAX_RETRY_ATTEMPTS
 
 
 class XinferenceEmbed(BaseEmbedding):
@@ -12,19 +12,20 @@ class XinferenceEmbed(BaseEmbedding):
     
     _FACTORY_NAME = "Xinference"
 
-    def __init__(self, api_key: str, model_name: str = "", base_url: str = "", **kwargs):
+    def __init__(self, api_key: str, model_provider: str, model_name: str = "", base_url: str = "", **kwargs):
         """
         初始化Xinference嵌入模型
         
         Args:
             api_key (str): API密钥
+            model_provider (str): 模型提供商
             model_name (str): 模型名称
             base_url (str): Xinference服务的基础URL
         """
         # 确保base_url以/v1结尾
         base_url = urljoin(base_url, "v1")
         
-        super().__init__(api_key, model_name, base_url, **kwargs)
+        super().__init__(api_key, model_provider, model_name, base_url, **kwargs)
         
         # 创建OpenAI兼容客户端
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)

@@ -1,12 +1,9 @@
 from typing import Dict, Type
-from app.infrastructure.llms.base_factory import BaseModelFactory
-from app.infrastructure.llms.chat_models.base.base import LLM
-from app.infrastructure.llms.chat_models.deepseek_llm import DeepSeekModels
-from app.infrastructure.llms.chat_models.claude_llm import ClaudeModels
-from app.infrastructure.llms.chat_models.openai_llm import OpenAIModels
-from app.infrastructure.llms.chat_models.qwen_llm import QwenModels
-from app.infrastructure.llms.chat_models.siliconflow_llm import SiliconFlowModels
-from app.infrastructure.llms.chat_models.zhipu_llm import ZhiPuModels
+from .base import LLM
+from .openai_llm import OpenAIModels
+from .claude_llm import ClaudeModels
+from .zhipu_llm import ZhiPuModels
+from ..base_factory import BaseModelFactory
 
 # =============================================================================
 # 聊天模型工厂
@@ -18,11 +15,11 @@ class LLMFactory(BaseModelFactory):
     @property
     def _models(self) -> Dict[str, Type[LLM]]:
         return {
-            "deepseek": DeepSeekModels,
+            "deepseek": OpenAIModels,
             "claude": ClaudeModels,
             "openai": OpenAIModels,
-            "qwen": QwenModels,
-            "siliconflow": SiliconFlowModels,
+            "qwen": OpenAIModels,
+            "siliconflow": OpenAIModels,
             "zhipu": ZhiPuModels,
         }
     

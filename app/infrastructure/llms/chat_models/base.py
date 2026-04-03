@@ -1,22 +1,11 @@
 import asyncio
 import json
 import logging
-import os
 import random
-import time
-from abc import ABC,abstractmethod
-from copy import deepcopy
-from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Protocol,Tuple,Union
-from urllib.parse import urljoin
-import json_repair
+from abc import ABC
+from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Tuple
 import httpx
-import openai
-import requests
-from openai import OpenAI
-from openai.lib.azure import AzureOpenAI
-from pydantic import BaseModel
-from app.utils.common import is_chinese
-from app.infrastructure.llms.chat_models.schemes import AskToolResponse,ChatResponse,ModelLimits,TokenUsage
+from .schemes import AskToolResponse,ChatResponse,ModelLimits,TokenUsage
 
 
 # 重试配置常量
@@ -49,18 +38,20 @@ def build_llm_httpx_timeout(**kwargs: Any) -> httpx.Timeout:
 class LLM(ABC):
     """LLM基类，提供通用的聊天功能和工具调用支持"""
     
-    def __init__(self, api_key: str, model_name: str, base_url: Optional[str] = None, language: str = "Chinese", **kwargs):
+    def __init__(self, api_key: str, model_provider: str, model_name: str, base_url: Optional[str] = None, language: str = "Chinese", **kwargs):
         """
         初始化LLM基类
         
         Args:
             api_key (str): API密钥
+            model_provider (str): 模型提供商
             model_name (str): 模型名称
             base_url (Optional[str]): API基础URL
             language (str): 语言设置，默认为中文
             kwargs (dict): 其他参数
         """
         self.api_key = api_key
+        self.model_provider = model_provider
         self.model_name = model_name
         self.base_url = base_url
         self.language = language

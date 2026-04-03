@@ -1,18 +1,17 @@
-from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Tuple,Union
+from typing import Any,AsyncGenerator,Dict,List,Literal,Optional,Tuple
 import asyncio
-import time
 import logging
 from zai import ZhipuAiClient
-from app.infrastructure.llms.chat_models.base.base import LLM, MAX_RETRY_ATTEMPTS
-from app.infrastructure.llms.chat_models.schemes import AskToolResponse,ChatResponse,TokenUsage,ToolInfo
-from app.infrastructure.llms.utils import num_tokens_from_string
-from app.infrastructure.llms.chat_models.base.openai_base import OpenAIBase
+from .base import MAX_RETRY_ATTEMPTS
+from .schemes import AskToolResponse,ChatResponse,TokenUsage,ToolInfo
+from .openai_llm import OpenAIModels
+from ..utils import num_tokens_from_string
 
 
-class ZhiPuModels(OpenAIBase):
+class ZhiPuModels(OpenAIModels):
     """智谱AI模型系列"""
     
-    def __init__(self, api_key: str, model_name: str = "glm-5", base_url: Optional[str] = None, language: str = "Chinese", **kwargs):
+    def __init__(self, api_key: str, model_provider: str, model_name: str = "glm-5", base_url: Optional[str] = None, language: str = "Chinese", **kwargs):
         """
         初始化智谱AI模型
         
@@ -23,7 +22,7 @@ class ZhiPuModels(OpenAIBase):
             language (str): 语言设置
             **kwargs: 其他参数
         """
-        super().__init__(api_key, model_name, base_url, language, **kwargs)
+        super().__init__(api_key, model_provider, model_name, base_url, language, **kwargs)
         
         # 创建智谱AI客户端
         self.client = ZhipuAiClient(

@@ -1,32 +1,54 @@
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 import numpy as np
+import json
 import logging
 import asyncio
 from openai import AsyncOpenAI
-from app.infrastructure.llms.embedding_models.base import BaseEmbedding, CONNECTION_TIMEOUT, MAX_RETRY_ATTEMPTS
-from app.infrastructure.llms.utils import truncate
+from openai.lib.azure import AsyncAzureOpenAI
+from .base import BaseEmbedding, CONNECTION_TIMEOUT, MAX_RETRY_ATTEMPTS
+from ..utils import truncate
 
 
 class OpenAIEmbed(BaseEmbedding):
     """OpenAI嵌入模型实现"""
-    def __init__(self, api_key: str, model_name: str = "text-embedding-ada-002", base_url: str = "https://api.openai.com/v1", **kwargs):
+    def __init__(self, api_key: str, model_provider: str, model_name: str, base_url: Optional[str] = None, **kwargs):
         """
         初始化OpenAI嵌入模型
         
         Args:
             api_key (str): OpenAI API密钥
+            model_provider (str): 模型提供商
             model_name (str): 模型名称，默认为text-embedding-ada-002
             base_url (str): API基础URL，默认为OpenAI官方URL
             **kwargs: 其他参数
         """
-        super().__init__(api_key, model_name, base_url, **kwargs)
+        if model_provider == "azure":
+            key_data = json.loads(api_key)
+            api_key_value = key_data.get("api_key", "")
+            api_version = key_data.get("api_version", "2024-02-01")
+            
+            self.client = AsyncAzureOpenAI(
+                api_key=api_key_value, 
+                azure_endpoint=base_url, 
+                api_version=api_version,
+                timeout=CONNECTION_TIMEOUT,
+                max_retries=MAX_RETRY_ATTEMPTS
+            )
+        elif model_provider in ["baichuan", "openai"]:
+            model_name =  model_name or "text-embedding-ada-002"
+            base_url = base_url or "https://api.openai.com/v1"
+            self.client = AsyncOpenAI(
+                api_key=api_key, 
+                base_url=base_url,
+                timeout=CONNECTION_TIMEOUT,
+                max_retries=MAX_RETRY_ATTEMPTS
+            )
+        else:
+            raise ValueError(f"Unsupported model provider: {model_provider}")
 
-        self.client = AsyncOpenAI(
-            api_key=api_key, 
-            base_url=base_url,
-            timeout=CONNECTION_TIMEOUT,
-            max_retries=MAX_RETRY_ATTEMPTS
-        )
+        super().__init__(api_key, model_provider, model_name, base_url, **kwargs)
+
+
 
     async def encode(self, texts: List[str]) -> Tuple[np.ndarray, int]:
         """

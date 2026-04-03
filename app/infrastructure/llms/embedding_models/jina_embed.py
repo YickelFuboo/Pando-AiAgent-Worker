@@ -3,23 +3,24 @@ import numpy as np
 import aiohttp
 import asyncio
 import logging
-from app.infrastructure.llms.embedding_models.base import BaseEmbedding, MAX_RETRY_ATTEMPTS
-from app.infrastructure.llms.utils import truncate
+from .base import BaseEmbedding, MAX_RETRY_ATTEMPTS
+from ..utils import truncate
 
 
 class JinaEmbed(BaseEmbedding):
     """Jina嵌入模型实现"""
 
-    def __init__(self, api_key: str, model_name: str = "jina-embeddings-v3", base_url: str = "https://api.jina.ai/v1/embeddings", **kwargs):
+    def __init__(self, api_key: str, model_provider: str, model_name: str = "jina-embeddings-v3", base_url: str = "https://api.jina.ai/v1/embeddings", **kwargs):
         """
         初始化Jina嵌入模型
         
         Args:
             api_key (str): API密钥
+            model_provider (str): 模型提供商
             model_name (str): 模型名称，默认为jina-embeddings-v3
             base_url (str): API基础URL，默认为Jina官方URL
         """
-        super().__init__(api_key, model_name, base_url, **kwargs)
+        super().__init__(api_key, model_provider, model_name, base_url, **kwargs)
         self.headers = {
             "Content-Type": "application/json", 
             "Authorization": f"Bearer {api_key}"

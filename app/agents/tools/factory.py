@@ -17,7 +17,6 @@ from app.agents.tools.local.file_read import ReadFileTool
 from app.agents.tools.local.file_search import GlobTool,GrepTool
 from app.agents.tools.local.file_write import InsertFileTool,MultiReplaceTextTool,ReplaceFileTextTool,WriteFileTool
 from app.agents.tools.local.shell import ExecTool
-from app.agents.tools.local.spawn import SpawnTool
 from app.agents.tools.local.todo import TodoReadTool,TodoWriteTool
 from app.agents.tools.local.web import WebFetchTool,WebSearchTool
 
@@ -98,6 +97,7 @@ def register_tools_by_config(
     if "cron" in usable:
         tools_to_register.append(CronTool(session_id=session_id,user_id=user_id,agent_type=agent_type,channel_id=channel_id,channel_type=channel_type))
     if "spawn" in usable and subagent_manager is not None:
+        from app.agents.tools.local.spawn import SpawnTool
         tools_to_register.append(SpawnTool(subagent_manager))
     if tools_to_register:
         tools_factory.register_tools(*tools_to_register)

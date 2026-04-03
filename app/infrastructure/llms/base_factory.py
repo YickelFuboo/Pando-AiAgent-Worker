@@ -9,6 +9,7 @@ from copy import copy
 from typing import Dict, Any, Optional, Type, TypeVar, Generic, Tuple
 from app.config.settings import PROJECT_BASE_DIR
 
+
 DEFAULT_CACHE_TTL_SECONDS = 3600
 
 T = TypeVar('T')
@@ -292,6 +293,7 @@ class BaseModelFactory(ABC, Generic[T]):
         # 创建模型实例
         instance = model_class(
             api_key=api_key,
+            model_provider=provider,
             model_name=model,
             base_url=base_url,
             language=language,

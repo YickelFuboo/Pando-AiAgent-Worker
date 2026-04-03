@@ -1,8 +1,6 @@
 from typing import Dict, Type
 from app.infrastructure.llms.base_factory import BaseModelFactory
-from .azure_embed import AzureEmbed
 from .baai_embed import BAAIEmbedding
-from .baichuan_embed import BaiChuanEmbed
 from .baidu_yiyan_embed import BaiduYiyanEmbed
 from .base import BaseEmbedding
 from .bedrock_embed import BedrockEmbed
@@ -33,8 +31,8 @@ class EmbeddingModelFactory(BaseModelFactory[BaseEmbedding]):
             "qwen": QWenEmbed,
             "zhipu": ZhipuEmbed,
             "ollama": OllamaEmbed,
-            "azure": AzureEmbed,
-            "baichuan": BaiChuanEmbed,
+            "azure": OpenAIEmbed,
+            "baichuan": OpenAIEmbed,
             "jina": JinaEmbed,
             "cohere": CoHereEmbed,
             "siliconflow": SILICONFLOWEmbed,
