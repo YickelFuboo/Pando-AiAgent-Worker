@@ -152,6 +152,7 @@ class ReActAgent(BaseAgent):
         self._state = AgentState.RUNNING
 
         llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
+
         context_builder = ContextBuilder(
             session_id=self.session_id,
             agent_type=self.agent_type,
@@ -323,17 +324,14 @@ class ReActAgent(BaseAgent):
         name = toolcall.function.name
         if name == "ask_question":
             args = toolcall.function.arguments or {}
+            formatted = []  
+            q = ""
             items = args.get("questions") or []
-            formatted: List[str] = []
-            if isinstance(items, list):
-                for i, q in enumerate(items, start=1):
-                    text = (q or "").strip()
-                    if text:
-                        formatted.append(f"{i}. {text}")
-            questions_text = "\n".join(formatted).strip()
-            await self.push_history_message_and_notify_user(
-                Message.assistant_message(questions_text or "请回答以下问题：")
-            )
+            if items and isinstance(items, list):
+                text = (q or "").strip()
+                formatted.append(f"{text}")
+            q = "\n".join(formatted)  
+            await self.push_history_message_and_notify_user(Message.assistant_message(q or ""))
         #elif name == "terminate":
         #    await self.push_history_message_and_notify_user(Message.assistant_message(args.get("summary") or ""))
 

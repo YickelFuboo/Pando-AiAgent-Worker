@@ -136,9 +136,15 @@ class SessionManager:
             logging.warning("Cannot delete: session not found: %s", session_id)
         return ok
 
-    async def save_session(self, session_id: str) -> None:
-        """持久化会话(如更新元数据后调用)。"""
-        session = await self.get_session(session_id)
+    async def save_session(self, session_id: str, session: Optional[Session] = None) -> None:
+        """持久化会话(如更新元数据后调用)。
+
+        传入 session 时优先保存该实例，并覆盖缓存，避免并发场景下被旧缓存对象覆盖。
+        """
+        if session is None:
+            session = await self.get_session(session_id)
+        else:
+            self.sessions[session_id] = session
         if session:
             await self._store.save(session)
 

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import List, Dict, Optional
 from sqlalchemy import delete, select
 from .message import Message
@@ -46,7 +47,7 @@ def _normalize_session_data(data: dict) -> None:
     if "channel_type" not in data:
         data["channel_type"] = ""
 
-LOCAL_SESSION_STORAGE_DIR = PROJECT_BASE_DIR / "data" /".sessions"
+LOCAL_SESSION_STORAGE_DIR = str(Path(PROJECT_BASE_DIR) / "data" / ".sessions")
 
 class LocalFileSessionStore(SessionStore):
     """本地文件存储：目录下 {session_id}.json，用 _cache 存 load 结果。"""

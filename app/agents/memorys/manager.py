@@ -50,10 +50,10 @@ Call the save_memory tool with both:
 - **Failure experience**: recurring errors, commands that fail in certain environments, wrong usage, pitfalls (paths, permissions, dependencies) that are likely to repeat.
 - **Success experience**: effective commands/workflows for this agent type, environment constraints that matter across sessions.
 
-**What to exclude or drop:** One-off details, session-specific context, redundant or low-signal items, anything that won't clearly help future runs. When in doubt, omit—prefer a short, actionable memory over a long one.
+**What to exclude or drop:** One-off details, session-specific context, redundant or low-signal items, generic capability descriptions, and anything that won't clearly help future runs. If there is no high-value reusable content, keep memory empty.
 
-**Full overwrite + prune:** Review "Current Agent Memory" and "Content to Process". Decide what to keep, what is outdated or marginal and should be dropped, and what new experience is worth adding. Output the **complete** updated MEMORY.md: merge new high-value items, remove low-value or duplicate items, keep the total **concise**. This level has no event log; pass an empty string for history_entry.""",
-            user_instruction="Based on the content below, review and fully update agent-level long-term memory. Keep only high-value, reusable experience; prune marginal or redundant items so memory stays concise. Leave history_entry empty, then call save_memory.",
+**Full overwrite + prune:** Review "Current Agent Memory" and "Content to Process". Decide what to keep, what is outdated or marginal and should be dropped, and what new experience is worth adding. Output the **complete** updated MEMORY.md: merge new high-value items, remove low-value or duplicate items, and enforce a hard total length limit of <=1500 tokens. This level has no event log; pass an empty string for history_entry.""",
+            user_instruction="Based on the content below, review and fully update agent-level long-term memory. Keep only high-value, reusable experience; if none, keep memory empty. Enforce hard length limit <=1500 tokens. Leave history_entry empty, then call save_memory.",
         )
 
 
@@ -227,7 +227,7 @@ class MemoryManager:
         self,
         *,
         archive_all: bool = False,
-        memory_window: int = 50
+        memory_window: int = 20
     ) -> bool:
         """记忆合并入口：基于 last_consolidated 取待处理消息，依次执行会话/工作空间/Agent 类型三层记忆提取，最后统一更新 last_consolidated 并持久化会话。"""
         session = await SESSION_MANAGER.get_session(self._session_id)
@@ -269,7 +269,7 @@ class MemoryManager:
         session.last_consolidated = (
             len(session.messages) if archive_all else (len(session.messages) - keep_count)
         )
-        await SESSION_MANAGER.save_session(session.session_id)
+        await SESSION_MANAGER.save_session(session.session_id, session=session)
 
         logging.info("Memory consolidation done: last_consolidated=%s", session.last_consolidated)
 

@@ -49,7 +49,7 @@ When constructing the summary, try to stick to this template:
         """判断当前 token 数是否接近上下文上限，需要触发压缩。
 
         Args:
-            tokens: 当前轮次的总 token 数（input + output 或 total）
+            usage: 当前轮次的总 token 数（input + output 或 total）
             llm: 当前使用的 LLM 实例，用于读取模型配置（context_limit/max_tokens）
 
         Returns:
