@@ -3,10 +3,10 @@
 ## Runtime
 {{ runtime }}
 
-## Agent Workspace
-- Agent workspace path: {{ agent_workspace }}
-- Long-term memory: {{ agent_workspace }}/memory/MEMORY.md
-- History log: {{ agent_workspace }}/memory/HISTORY.md
+## Workspace
+- Agent workspace path: {{ workspace_path }}
+- Long-term memory: {{ workspace_path }}/memory/MEMORY.md
+- History log: {{ workspace_path }}/memory/HISTORY.md
 
 ## Memory
 - Persist important reusable facts to MEMORY.md

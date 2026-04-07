@@ -52,7 +52,7 @@ class ContextBuilder:
 
         self.params.update({
             "runtime": runtime,
-            "agent_workspace": str(Path(self.workspace_path).expanduser().resolve()),
+            "workspace_path": str(Path(self.workspace_path).expanduser().resolve()),
         })  
 
         # 1. 构造Agent类型对应的引导文件（从 .agent/agent_type/prompt 目录读）
