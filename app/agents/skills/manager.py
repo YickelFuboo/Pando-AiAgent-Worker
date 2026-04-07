@@ -19,10 +19,10 @@ class SkillsManager:
     技能加载器：从工作区与内置目录列举/读取 SKILL.md，为 ContextBuilder 提供
     常驻技能全文与全体技能摘要（按需加载时 Agent 用 read_file 读 path）。
     """
-    def __init__(self, agent_path: str, agent_workspace: str):   
+    def __init__(self, agent_path: str, workspace_path: str):   
         self.builtin_skills_dir = Path(Path(__file__).parent)
         self.agent_skills_dir = Path(agent_path) / SKILLS_DIR  # Agent特有的Skills   
-        self.workspace_skills_dir = Path(agent_workspace) / SKILLS_DIR  # 工作空间特有的Skills
+        self.workspace_skills_dir = Path(workspace_path) / SKILLS_DIR  # 工作空间特有的Skills
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -111,12 +111,16 @@ class SkillsManager:
 
         return "\n\n---\n\n".join(parts) if parts else ""
     
-    def build_skills_summary(self) -> str:
+    def build_skills_summary(self, filter_skills: list[str] | None = None) -> str:
         """
-        生成全体技能的 XML 摘要（name、description、path、available、缺失的 requires），
+        生成技能的 XML 摘要（name、description、path、available、缺失的 requires），
         放入 system prompt 的「# Skills」，供 Agent 按需用 read_file 读 location 指向的 SKILL.md。
+        filter_skills 非空时只包含名单内的技能（按目录名匹配）；为 None 时列举全部。
         """
         all_skills = self.list_skills(filter_unavailable=False)
+        if filter_skills is not None and len(filter_skills) > 0:
+            allow = set(filter_skills)
+            all_skills = [s for s in all_skills if s["name"] in allow]
         if not all_skills:
             return ""
 
@@ -172,14 +176,18 @@ class SkillsManager:
                 return {}
         return {}
 
-    def get_always_skills(self) -> list[str]:
-        """返回 frontmatter 中 always=true 且需求满足的技能名列表，用于 system prompt 的常驻技能全文。"""
+    def get_always_skills(self, filter_skills: list[str] | None = None) -> list[str]:
+        """返回 frontmatter 中 always=true 且需求满足的技能名列表，用于 system prompt 的常驻技能全文。
+        filter_skills 非空时只保留名单内的技能；为 None 时不按名过滤。"""
         result = []
         for s in self.list_skills(filter_unavailable=True):
             frontmatter = self.get_skill_frontmatter(s["name"]) or {}
             skill_meta = self.get_skill_metadata(s["name"]) or {}
             if skill_meta.get("always") or frontmatter.get("always"):
                 result.append(s["name"])
+        if filter_skills is not None and len(filter_skills) > 0:
+            allow = set(filter_skills)
+            result = [n for n in result if n in allow]
         return result
     
     def _get_missing_requirements(self, skill_meta: dict) -> str:

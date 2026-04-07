@@ -157,8 +157,7 @@ class Settings(BaseSettings):
     # Agent配置 - Agent 会话存储
     # =============================================================================
     agent_session_use_local_storage: bool = Field(default=False, description="为 True 时会话存本地文件，为 False 时存数据库", env="AGENT_SESSION_USE_LOCAL_STORAGE")
-    agent_session_storage_dir: str = Field(default="data/sessions", description="本地会话文件目录(仅本地存储时生效)", env="AGENT_SESSION_STORAGE_DIR")
-
+   
     # =============================================================================
     # 会话压缩 - Session Compaction
     # =============================================================================

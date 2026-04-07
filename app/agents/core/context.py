@@ -9,12 +9,7 @@ from typing import Any, Optional
 from app.infrastructure.llms.prompts.prompt_template_load import get_prompt_template
 from ..skills.manager import SkillsManager
 from ..memorys.manager import MemoryManager
-
-
-# Agent 目录下引导文件所在子目录（.agent/agent_type/prompt）
-AGENT_CONTEXT_PATH = "prompts"
-# 会被读入 system prompt 的引导文件名（按顺序，存在则读）
-AGENT_CONTEXT_FILES = ["AGENT.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md", "RUNTIME.md"]
+from ..contants import AGENT_CONTEXT_PATH, AGENT_CONTEXT_FILES
 
 
 class ContextBuilder:
@@ -24,27 +19,30 @@ class ContextBuilder:
         session_id: str,
         agent_type: str,
         agent_path: str,
-        agent_workspace: str,
+        workspace_path: str,
         agent_description: str = "",
+        skill_names: list[str] | None = None,
         params: Optional[dict[str, Any]] = None,
     ):
         self.session_id = session_id
         self.agent_path = agent_path
-        self.agent_workspace_path = agent_workspace
+        self.workspace_path = workspace_path
         self.params = dict(params) if params else {}
-        self.skills_manager = SkillsManager(agent_path, agent_workspace)
+        self._skill_names = skill_names
+        self.skills_manager = SkillsManager(agent_path, workspace_path)
         self.memory_manager = MemoryManager(
             session_id=session_id, 
             agent_type=agent_type,
             agent_path=agent_path,
-            agent_workspace=agent_workspace,
+            workspace_path=workspace_path,
             agent_description=agent_description
         )
     
-    async def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    async def build_system_prompt(self) -> str:
         """
         拼出完整的 system prompt 字符串。
         顺序：身份与约定 → 引导文件 → 记忆 → 常驻技能全文 → 技能摘要（提示用 read_file 按需读）。
+        skill_names：仅将这些技能（目录名）纳入常驻块与摘要；None 表示不限制。
         """
         parts = []
 
@@ -54,7 +52,7 @@ class ContextBuilder:
 
         self.params.update({
             "runtime": runtime,
-            "agent_workspace": str(Path(self.agent_workspace).expanduser().resolve()),
+            "agent_workspace": str(Path(self.workspace_path).expanduser().resolve()),
         })  
 
         # 1. 构造Agent类型对应的引导文件（从 .agent/agent_type/prompt 目录读）
@@ -72,13 +70,13 @@ class ContextBuilder:
             parts.append(f"# Memory\n\n{memory}")
 
         # 3. 技能分两种：常驻技能直接全文放入；其余只给摘要，让 Agent 用 read_file 按需读 SKILL.md
-        always_skills = self.skills_manager.get_always_skills()
+        always_skills = self.skills_manager.get_always_skills(filter_skills=self._skill_names)
         if always_skills:
             always_content = self.skills_manager.get_skills_content_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills_manager.build_skills_summary()
+        skills_summary = self.skills_manager.build_skills_summary(filter_skills=self._skill_names)
         if skills_summary:
             parts.append(f"""# Skills
 

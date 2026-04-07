@@ -9,8 +9,8 @@ from sqlalchemy import delete, select
 from .message import Message
 from .models import SessionRecord
 from .session import Session
-from app.config.settings import settings
 from app.infrastructure.database import get_db
+from app.config.settings import PROJECT_BASE_DIR
 
 
 class SessionStore(ABC):
@@ -46,12 +46,13 @@ def _normalize_session_data(data: dict) -> None:
     if "channel_type" not in data:
         data["channel_type"] = ""
 
+LOCAL_SESSION_STORAGE_DIR = PROJECT_BASE_DIR / "data" /".sessions"
 
 class LocalFileSessionStore(SessionStore):
     """本地文件存储：目录下 {session_id}.json，用 _cache 存 load 结果。"""
 
     def __init__(self) -> None:
-        self.storage_dir = settings.agent_session_storage_dir
+        self.storage_dir = LOCAL_SESSION_STORAGE_DIR
         self._cache: Dict[str, Session] = {}
 
     def _load_one(self, session_id: str) -> Optional[Session]:

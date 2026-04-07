@@ -23,7 +23,7 @@ from app.agents.tools.local.web import WebFetchTool,WebSearchTool
 
 def register_tools_by_config(
     *,
-    config_json:Dict[str,Any],
+    usable_tool_names:List[str],
     tools_factory:"ToolsFactory",
     agent_type:str,
     session_id:str,
@@ -33,13 +33,7 @@ def register_tools_by_config(
     subagent_manager:Optional[Any]=None,
     params:Dict[str,Any],
 )->None:
-    # 解析配置文件中的工具权限
-    usable=set()
-    tools_policy=config_json.get("tools")
-    if isinstance(tools_policy,dict):
-        for tool_name,decision in tools_policy.items():
-            if str(decision).strip().lower()=="allow":
-                usable.add(str(tool_name))
+    usable=set(usable_tool_names)
 
     # 根据 agent_type 和 params 初始化工具参数
     is_code_agent=agent_type in {"CodeAnalysis","CodeAgent","CodingAgent"}
@@ -115,12 +109,12 @@ def _cache_key(tool_name: str, tool_params: Dict[str, Any]) -> tuple[str, str]:
 
 class ToolsFactory:
     """工具市场管理器；超长输出截断时的 hint 根据是否可委托子 Agent（当前是否注册 spawn）选择不同提示。"""
-    def __init__(self, *tools: BaseTool, agent_workspace: str = ""):
+    def __init__(self, *tools: BaseTool, workspace_path: str = ""):
         self._tools: Dict[str, BaseTool] = {tool.name: tool for tool in tools}
         self._cacheable: set[str] = set(TOOLS_CACHE_NAME)
         self._max_cache_size = MAX_CACHE_SIZE
         self._result_cache: Dict[tuple[str, str], ToolResult] = {}
-        self._agent_workspace = agent_workspace
+        self._workspace_path = workspace_path
 
     def get_tool(self, name: str) -> BaseTool:
         return self._tools.get(name)
@@ -226,11 +220,11 @@ class ToolsFactory:
             result = await tool.execute(**tool_params)
 
             # 仅对成功结果做超长截断，统一在 Factory 处理；工具无需自行截断
-            if result.status == ToolResultStatus.EXECUTE_SUCCESS and self._agent_workspace:
+            if result.status == ToolResultStatus.EXECUTE_SUCCESS and self._workspace_path:
                 raw = f"{result.result}"
                 truncated = Truncate.output(
                     raw,
-                    self._agent_workspace,
+                    self._workspace_path,
                     has_task_tool=self.has_spawn_tool,
                 )
                 if truncated.truncated and truncated.output_path:

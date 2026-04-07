@@ -1,0 +1,29 @@
+{
+  "tools": {
+    "ask_question": "allow",
+    "terminate": "deny",
+    "read_file": "allow",
+    "write_file": "allow",
+    "replace_file_text": "allow",
+    "insert_file": "allow",
+    "multi_replace_text": "allow",
+    "glob_search": "allow",
+    "grep_search": "allow",
+    "read_dir": "allow",
+    "exec": "allow",
+    "list_code_files": "deny",
+    "apply_patch": "allow",
+    "code_similar_search": "deny",
+    "code_related_files_search": "deny",
+    "code_dependencies_search": "deny",
+    "lsp": "deny",
+    "code_shell": "deny",
+    "todo_read": "allow",
+    "todo_write": "allow",
+    "batch_tools": "allow",
+    "web_search": "allow",
+    "web_fetch": "allow",
+    "cron": "allow",
+    "spawn": "allow"
+  }
+}

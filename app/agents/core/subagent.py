@@ -43,6 +43,11 @@ SUBAGENT_TOOLS_CONFIG={
         "spawn":"deny",
     },
 }
+SUBAGENT_USABLE_TOOL_NAMES=[
+    str(n)
+    for n, d in SUBAGENT_TOOLS_CONFIG["tools"].items()
+    if str(d).strip().lower()=="allow"
+]
 
 
 class SubAgentManager(ABC):
@@ -55,7 +60,7 @@ class SubAgentManager(ABC):
         session_id: str,
         channel_type: str,
         channel_id: str,
-        agent_workspace: str,
+        workspace_path: str,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
         temperature: Optional[float] = None,
@@ -68,7 +73,7 @@ class SubAgentManager(ABC):
         self.session_id = session_id
         self.channel_type = channel_type
         self.channel_id = channel_id
-        self.agent_workspace = agent_workspace
+        self.workspace_path = workspace_path
 
         # 模型信息
         self.llm_provider = llm_provider or ""
@@ -96,7 +101,7 @@ class SubAgentManager(ABC):
             session_id=self.session_id,
             channel_type=self.channel_type,
             channel_id=self.channel_id,
-            agent_workspace=self.agent_workspace,
+            workspace_path=self.workspace_path,
             parent_agent_type=self.parent_agent_type,
             llm_provider=self.llm_provider,
             llm_model=self.llm_model,
@@ -110,7 +115,7 @@ class SubAgentManager(ABC):
         self._running_tasks[task_id] = bg_task
         bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
 
-        logging.info("Started subagent [{}]: {}", task_id, display_label)
+        logging.info("Started subagent [%s]: %s", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
 
 
@@ -123,7 +128,7 @@ class SubAgent(ABC):
         session_id: str,
         channel_type: str,
         channel_id: str,
-        agent_workspace: str,
+        workspace_path: str,
         parent_agent_type: str,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
@@ -136,7 +141,7 @@ class SubAgent(ABC):
         self.session_id = session_id
         self.channel_type = channel_type
         self.channel_id = channel_id
-        self.agent_workspace = agent_workspace
+        self.workspace_path = workspace_path
         self.parent_agent_type = parent_agent_type
 
         # 提示词信息
@@ -158,7 +163,7 @@ class SubAgent(ABC):
         self._max_duplicate_steps = 2   # 最大重复次数，用于检验当前项agent是否挂死
 
         # 工具信息
-        self.available_tools = ToolsFactory(agent_workspace=self.agent_workspace)
+        self.available_tools = ToolsFactory(workspace_path=self.workspace_path)
         self.tool_choices = ToolChoice.AUTO
         self._register_tools()
         self.history_messages: List[Message] = []
@@ -185,7 +190,7 @@ class SubAgent(ABC):
     def _register_tools(self) -> None:
         """SubAgent 工具根据内置配置注册，不注册 SpawnTool。"""
         register_tools_by_config(
-            config_json=SUBAGENT_TOOLS_CONFIG,
+            usable_tool_names=SUBAGENT_USABLE_TOOL_NAMES,
             tools_factory=self.available_tools,
             agent_type="SubAgent",
             session_id=self.session_id,
@@ -235,7 +240,7 @@ You are a subagent spawned by the main agent to complete a specific task.
 - Keep raw logs minimal; summarize first and include only necessary details
 
 ## Agent Workspace
-Your agent workspace is at: {self.agent_workspace_path}
+Your agent workspace is at: {self.workspace_path}
 
 When done, return a structured, evidence-based summary aligned with the Output Contract."""
 

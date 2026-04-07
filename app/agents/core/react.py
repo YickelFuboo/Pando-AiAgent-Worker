@@ -2,8 +2,9 @@ import asyncio
 import json
 import logging
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from app.agents.core.base import AgentState, BaseAgent, ToolChoice, AGENT_DIR, AGENT_WORKSPACE_DIR, extract_stream_tool_calls
+from app.agents.core.base import AgentState, BaseAgent, ToolChoice, extract_stream_tool_calls
 from app.agents.tools.factory import ToolsFactory,register_tools_by_config
 from app.agents.sessions.message import Message, ToolCall, Function
 from app.agents.sessions.manager import SESSION_MANAGER
@@ -13,11 +14,7 @@ from app.infrastructure.llms.chat_models.schemes import TokenUsage
 from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
 from app.agents.core.subagent import SubAgentManager
-
-
-# MCP 配置：.agent/{agent_type}/mcp_servers.json
-MCP_SERVERS_FILENAME = "mcp_servers.json"
-USABLE_TOOLS_FILENAME = "usable_tools.json"
+from app.agents.contants import AGENTS_ROOT_PATH, MCP_SERVERS_FILENAME, USABLE_TOOLS_FILENAME
 
 
 class ReActAgent(BaseAgent):
@@ -59,12 +56,6 @@ class ReActAgent(BaseAgent):
             **kwargs,
         )
 
-        # 设置工作空间路径
-        if agent_type == "AiAssistant":
-            self.agent_workspace = str(AGENT_WORKSPACE_DIR / self.user_id / self.agent_type)
-        else:
-            self.agent_workspace = str(AGENT_WORKSPACE_DIR / "default")
-
         # 子Agent管理器
         self.subagent_manager = SubAgentManager(
             user_id=user_id,
@@ -72,14 +63,14 @@ class ReActAgent(BaseAgent):
             session_id=session_id,
             channel_type=channel_type,
             channel_id=channel_id,
-            agent_workspace=self.agent_workspace,
+            workspace_path=self.workspace_path,
             llm_provider=self.llm_provider,
             llm_model=self.llm_model,
             temperature=self.temperature,
         )
 
         # 工具信息
-        self.available_tools = ToolsFactory(agent_workspace=self.agent_workspace)
+        self.available_tools = ToolsFactory(workspace_path=self.workspace_path)
         self.tool_choices = ToolChoice.AUTO
         self.special_tool_names: List[str] = ["ask_question", "terminate"]
         self._register_tools()
@@ -88,7 +79,7 @@ class ReActAgent(BaseAgent):
 
     def _register_tools(self) -> None:
         """根据 .agent/{agent_type}/usable_tools.json 注册工具，仅注册配置中列出的项。"""
-        config_path = AGENT_DIR / self.agent_type / USABLE_TOOLS_FILENAME
+        config_path = Path(self.agent_path) / USABLE_TOOLS_FILENAME
         if not config_path.is_file():
             return
         try:
@@ -96,9 +87,16 @@ class ReActAgent(BaseAgent):
         except Exception as e:
             logging.warning("Failed to load usable tools config %s: %s", config_path, e)
             return
-        
+        tools_policy = raw.get("tools")
+        usable_tool_names: List[str] = []
+        if isinstance(tools_policy, dict):
+            usable_tool_names = [
+                str(name)
+                for name, decision in tools_policy.items()
+                if str(decision).strip().lower() == "allow"
+            ]
         register_tools_by_config(
-            config_json=raw,
+            usable_tool_names=usable_tool_names,
             tools_factory=self.available_tools,
             agent_type=self.agent_type,
             session_id=self.session_id,
@@ -114,7 +112,7 @@ class ReActAgent(BaseAgent):
         if self._mcp_registered:
             return
         
-        config_path = AGENT_DIR / self.agent_type / MCP_SERVERS_FILENAME
+        config_path = Path(self.agent_path) / MCP_SERVERS_FILENAME
         if not config_path.is_file():
             return
         try:
@@ -155,21 +153,22 @@ class ReActAgent(BaseAgent):
 
         llm = llm_factory.create_model(provider=self.llm_provider, model=self.llm_model)
         context_builder = ContextBuilder(
-            session_id=self.session_id, 
+            session_id=self.session_id,
             agent_type=self.agent_type,
             agent_path=self.agent_path,
-            agent_workspace=self.agent_workspace,
+            workspace_path=self.workspace_path,
             agent_description=self.description,
+            skill_names=self.skill_names,
             params=self.params,
         )
         memory_manager = MemoryManager(
-            session_id=self.session_id, 
+            session_id=self.session_id,
             agent_type=self.agent_type,
             agent_path=self.agent_path,
-            agent_workspace=self.agent_workspace,
+            workspace_path=self.workspace_path,
             agent_description=self.description,
             llm_provider=self.llm_provider,
-            llm_model=self.llm_model
+            llm_model=self.llm_model,
         )
         try:
             # 连接并注册 MCP 工具
@@ -324,14 +323,17 @@ class ReActAgent(BaseAgent):
         name = toolcall.function.name
         if name == "ask_question":
             args = toolcall.function.arguments or {}
-            formatted = []  
-            q = ""
             items = args.get("questions") or []
-            if items and isinstance(items, list):
-                text = (q or "").strip()
-                formatted.append(f"{text}")
-            q = "\n".join(formatted)  
-            await self.push_history_message_and_notify_user(Message.assistant_message(q or ""))
+            formatted: List[str] = []
+            if isinstance(items, list):
+                for i, q in enumerate(items, start=1):
+                    text = (q or "").strip()
+                    if text:
+                        formatted.append(f"{i}. {text}")
+            questions_text = "\n".join(formatted).strip()
+            await self.push_history_message_and_notify_user(
+                Message.assistant_message(questions_text or "请回答以下问题：")
+            )
         #elif name == "terminate":
         #    await self.push_history_message_and_notify_user(Message.assistant_message(args.get("summary") or ""))
 

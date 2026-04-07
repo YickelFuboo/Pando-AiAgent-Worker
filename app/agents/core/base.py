@@ -5,7 +5,7 @@ from abc import ABC
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from app.config.settings import PROJECT_BASE_DIR
+from app.agents.contants import AGENTS_ROOT_PATH, WORKSPACE_ROOT_PATH, USER_ROOT_PATH, AGENT_META_FILENAME, USABLE_SKILLS_FILENAME
 from app.agents.sessions.manager import SESSION_MANAGER
 from app.agents.sessions.message import Role, Message, ToolCall, Function
 
@@ -47,7 +47,7 @@ def extract_stream_tool_calls(text: str) -> Tuple[str, List[ToolCall]]:
 
 class AgentState(str, Enum):
     """Agent state enumeration"""
-    IDLE = "IDEL"  # Idle state
+    IDLE = "IDLE"  # Idle state
     RUNNING = "RUNNING"  # Running state
     WAITING = "WAITING"  # Waiting for user input
     ERROR = "ERROR"  # Error state
@@ -58,10 +58,6 @@ class ToolChoice(str, Enum):
     NONE = "none"
     AUTO = "auto"
     REQUIRED = "required"
-
-# 当前文件所在目录（各技能为子目录，如 memory/SKILL.md）
-AGENT_DIR = Path(PROJECT_BASE_DIR) / ".agent"
-AGENT_WORKSPACE_DIR = Path(PROJECT_BASE_DIR) / "data" / ".agent_workspace"
 
 class BaseAgent(ABC):
     """Base Agent class
@@ -120,12 +116,22 @@ class BaseAgent(ABC):
         self._max_duplicate_steps = max_duplicate_steps or 2   # 最大重复次数，用于检验当前项agent是否挂死
         self._stop_requested = False
 
-        self.agent_path = str(AGENT_DIR / agent_type)
+        # 相关路径
+        self.agent_path = str(AGENTS_ROOT_PATH / agent_type) # Agent的定义路径
+        self.user_path = str(USER_ROOT_PATH / user_id)  # Agent的用户数据空间路径
+        self.workspace_path = str(WORKSPACE_ROOT_PATH / user_id / agent_type)  # Agent的工作空间路径
+        self.project_path = None  # Agent工作的目标项目路径
+
+        # 技能相关
+        self.skill_names: list[str] = []
+        self.skills_extend_enabled = False
+        self._load_skills_config(self.agent_path)
+        
         self._load_meta(self.agent_path)
 
     def _load_meta(self, agent_path: str) -> None:
         """Load .agent/{agent_type}/meta.json and set description (English)."""
-        meta_path = Path(agent_path) / "meta.json"
+        meta_path = Path(agent_path) / AGENT_META_FILENAME
         if not meta_path.is_file():
             return
         try:
@@ -134,6 +140,29 @@ class BaseAgent(ABC):
             self.description = (data.get("description_en") or "").strip()
         except Exception as e:
             logging.warning("Failed to load meta.json for agent %s: %s", self.agent_type, e)
+
+    def _load_skills_config(self, agent_path: str) -> None:
+        """从 usable_skills.json 加载 enable_extend（yes/no）与 allow 名单（与 usable_tools 策略一致）。"""
+        skills_path = Path(agent_path) / USABLE_SKILLS_FILENAME
+        if not skills_path.is_file():
+            return
+        try:
+            with open(skills_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logging.warning("Failed to load usable skills config %s: %s", skills_path, e)
+            return
+        # 解析允许的skills
+        skills_policy = data.get("skills")
+        if isinstance(skills_policy, dict):
+            self.skill_names = [
+                str(name)
+                for name, decision in skills_policy.items()
+                if str(decision).strip().lower() == "allow"
+            ]
+        # 解析是否允许自扩展skills
+        ext = str(data.get("enable_extend", "no")).strip().lower()
+        self.skills_extend_enabled = ext == "yes"
 
     def force_stop(self) -> None:
         """强制当前运行中的 Agent 停止（由外部如 /stop 命令调用）。"""
