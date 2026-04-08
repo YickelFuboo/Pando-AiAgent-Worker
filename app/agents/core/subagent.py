@@ -468,10 +468,14 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         if not self.history_messages:
             return True
         compact_until = max(0, len(self.history_messages) - max(0, keep_last_n))
-        to_summarize = self.history_messages[:compact_until]
+        start = self.last_compacted if (self.compaction is not None and self.last_compacted > 0) else 0
+        if compact_until <= start:
+            return True
+        to_summarize = self.history_messages[start:compact_until]
         if not to_summarize:
             return True
-        summary_message = await SessionCompaction.compact(llm=llm, messages=to_summarize)
+        previous_summary = self.compaction.content if self.compaction is not None else ""
+        summary_message = await SessionCompaction.compact(llm=llm, messages=to_summarize, previous_summary=previous_summary)
         if summary_message is None or not (summary_message.content or "").strip():
             return False
         self.compaction = summary_message

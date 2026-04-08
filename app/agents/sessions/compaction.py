@@ -1,5 +1,7 @@
 """会话压缩：当 token 接近上下文上限时，用摘要替代长历史。"""
+import json
 import logging
+import re
 import time
 from typing import List,Optional
 from app.agents.sessions.message import Message,Role
@@ -11,9 +13,12 @@ from app.infrastructure.llms.utils import num_tokens_from_string
 
 class SessionCompaction:
     COMPACTION_BUFFER = 20_000
-    COMPACTION_PROMPT = """Provide a detailed prompt for continuing our conversation above.
-Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next.
-The summary that you construct will be used so that another agent can read it and continue the work.
+    COMPACTION_SYSTEM = (
+            """You are a session summarization agent.
+Your task is to summarize the conversation history. The summary will be used as continuation context by another agent.
+Do not continue the original task. Do not call tools. Summarize only. 
+
+Your summary should focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next.
 
 When constructing the summary, try to stick to this template:
 ---
@@ -37,9 +42,16 @@ When constructing the summary, try to stick to this template:
 ## Relevant files / directories
 
 [Construct a structured list of relevant files that have been read, edited, or created that pertain to the task at hand. If all the files in a directory are relevant, include the path to the directory.]
----"""
+---
+            """
+        )
 
-
+    @staticmethod
+    def _looks_like_tool_output(text: str) -> bool:
+        s = (text or "").lower()
+        markers = ("<tool_call>", "<tool>", "<arg_key>", "<arg_value>", "</tool_call>")
+        return any(m in s for m in markers)
+    
     @staticmethod
     def is_overflow(
         *,
@@ -83,26 +95,47 @@ When constructing the summary, try to stick to this template:
         max_out = llm_max_output_tokens or 8192
         usable_ctx = limit - max_out - res  # 可用空间 = 上下文上限 - 下轮最大输出 token 数 - 为压缩预留的 token 缓冲
         if usable_ctx <= 0:
-            return False
+            return True
         return basis >= usable_ctx  # 当前输入 token 是否超过可用空间
 
     @staticmethod
-    async def compact(*, llm:object, messages:List[Message])->Optional[Message]:
-        """生成会话摘要：使用 LLM 生成会话摘要。"""
+    async def compact(
+        *,
+        llm: object,
+        messages: List[Message],
+        previous_summary: str = "",
+    ) -> Optional[Message]:
+        """生成会话摘要：将历史摘要（可选）与新增消息合并为新的摘要。"""
         if not messages:
             return None
-        history=[m.to_context() for m in messages]
-        compact_system="You are a session summarization agent. Summarize the conversation concisely."
-        response, usage = await llm.chat(
-            system_prompt=compact_system,
+        history = [m.to_context() for m in messages]
+        prev = (previous_summary or "").strip()
+        question = (
+            "Please summarize the conversation history.\n"
+        )
+        if prev:
+            question += (
+                "\n\n[Previous Summary]\n"
+                f"{prev}\n"
+                "\nMerge the previous summary with the new conversation history and output one updated summary."
+            )
+        response, _ = await llm.chat(
+            system_prompt=SessionCompaction.COMPACTION_SYSTEM,
             user_prompt="",
-            user_question=SessionCompaction.COMPACTION_PROMPT,
+            user_question=question,
             history=history,
-            temperature=0.3,
+            temperature=0.1,
         )
         if not response or not response.success or not response.content:
             return None
-        return Message(role=Role.ASSISTANT,content=response.content.strip())
+        content = response.content.strip()
+        # 清理可能混入的思考片段，避免污染 JSON 解析。
+        content = re.sub(r"<think>[\s\S]*?</think>", "", content, flags=re.IGNORECASE).strip()
+        if not content or content.lower().startswith("llm error:"):
+            return None
+        if SessionCompaction._looks_like_tool_output(content):
+            return None
+        return Message(role=Role.ASSISTANT, content=content)
 
 
     @staticmethod

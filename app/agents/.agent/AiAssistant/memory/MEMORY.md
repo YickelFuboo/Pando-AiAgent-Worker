@@ -10,25 +10,34 @@
 - When users write partial/unclear phrases, provide clarification options
 - Respond in user's language when they communicate in that language
 - For location/destination queries, require specific address or landmark details
-- Use web_search for real-time information gathering (transportation, locations, services)
+- Use web_search for real-time information gathering (transportation, locations, services, price comparisons)
 - Use todo_app for task management and todo_read for status checks
 - Use status commands like /status? to check current task state
-
-## Transportation & Planning Experience
-- Flight Xi'an to Shanghai average travel time: ~2.5 hours
-- Xi'an Airport Terminal T3 departure for Shanghai flights, Terminal T5 for most other routes
-- Shanghai airports: Hongqiao (closer to city center), Pudong (international flights)
-- Always check airport transit times and recommend arriving 2 hours before flight departure
-- Include city-to-airport transit time in travel calculations (typically 1-1.5 hours)
-- When users have tight schedules, calculate backwards: meeting time → airport arrival → flight departure → city departure timing
-- Shanghai Hongqiao Airport to city center: Metro Line 10 (46 minutes, ~$1), Taxi (14 minutes, $11-14)
-- Terminal distances matter - T3 and T5 at Xi'an airport are far apart and not walkable
-- Shanghai Metro Line 17 serves West Qin Station for Huawei R&D center locations
-- Hongqiao Airport transportation includes Line 2 (downtown), Line 10 (city center), and Line 17 (Xinqing/Huawei R&D)
 
 ## Tool Usage Experience
 - flight_search_flight requires departure, destination, and date parameters
 - flight_search_flight returns structured data with airlines, times, and terminal information
-- web_search requires query and optional count parameter for information gathering
+- web_search requires query and optional count parameter for information gathering, effective for price comparisons across platforms
 - todo_read for checking todo list status, returns remaining count and todo items
-- Use web_search for location-based queries when specific addresses or landmarks are mentioned
+- cron reminders are system-internal notifications, not SMS/calls to external phone numbers
+- Personal name tracking: remember and use user's preferred name in conversations
+
+## Transportation Planning Essentials
+- Xi'an to Shanghai: average travel time ~2.5 hours, China Eastern Airlines most popular
+- Xi'an Airport: T3 for Shanghai flights, T5 for most other routes (not walkable)
+- Shanghai airports: Hongqiao (closer to city), Pudong (international)
+- Hongqiao Airport T2 directly connected to railway station (5-minute indoor walkway)
+- Hongqiao Metro connections: Line 2 (downtown), Line 10 (city center), Line 17 (Xincen/Huawei R&D)
+- Always include city-to-airport transit time (1-1.5 hours) and recommend arriving 2 hours before departure
+- Tight schedule calculation: meeting time → airport arrival → flight departure → city departure
+
+## Location-Specific Knowledge
+- Shanghai Metro Line 17 serves Xincen Station (opened Nov 30, 2024) for Huawei R&D center
+- Metro vs taxi: Metro cheaper and avoids traffic, taxi better for luggage
+- Price comparison essential across platforms (Ctrip, Qunar, Fliggy, airline official sites)
+
+## Flight Booking Process
+- Airline websites and APPs provide direct booking, price protection, and 24/7 customer service
+- Electronic invoice delivery via email, with customer service assistance available
+- Airport counter service available for immediate paper invoices (require order number and ID)
+- Multi-platform price comparison recommended: official sites, Ctrip, Qunar, Fliggy, Tianxun

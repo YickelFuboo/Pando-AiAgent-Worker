@@ -269,7 +269,7 @@ class MemoryManager:
         session.last_consolidated = (
             len(session.messages) if archive_all else (len(session.messages) - keep_count)
         )
-        await SESSION_MANAGER.save_session(session.session_id, session=session)
+        await SESSION_MANAGER.save_session(session)
 
         logging.info("Memory consolidation done: last_consolidated=%s", session.last_consolidated)
 

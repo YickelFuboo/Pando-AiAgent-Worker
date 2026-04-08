@@ -15,6 +15,7 @@ from app.agents.core.context import ContextBuilder
 from app.agents.memorys.manager import MemoryManager
 from app.agents.core.subagent import SubAgentManager
 from app.agents.contants import AGENTS_ROOT_PATH, MCP_SERVERS_FILENAME, USABLE_TOOLS_FILENAME
+from app.config.settings import settings
 
 
 class ReActAgent(BaseAgent):
@@ -348,7 +349,7 @@ class ReActAgent(BaseAgent):
         if SessionCompaction.is_overflow(usage=usage, llm=llm) or force: # force为True时，强制压缩
             await SESSION_MANAGER.compact_session(
                 self.session_id,
-                keep_last_n=4,
+                keep_last_n=max(6, settings.compaction_keep_last_n),
             )
 
         await SESSION_MANAGER.prune_session(self.session_id)

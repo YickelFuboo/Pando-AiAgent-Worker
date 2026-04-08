@@ -19,7 +19,11 @@ class SessionManager:
             LocalFileSessionStore() if settings.agent_session_use_local_storage
             else DatabaseSessionStore()
         )
-        self.sessions: Dict[str, Session] = {}
+
+    async def save_session(self, session: Session) -> None:
+        """持久化会话"""
+        if session:
+            await self._store.save(session)
 
     async def create_session(
         self,
@@ -45,8 +49,7 @@ class SessionManager:
             llm_model=llm_model or "",
             metadata=metadata or {},
         )
-        self.sessions[session_id] = session
-        await self._store.save(session)
+        await self.save_session(session)
 
         logging.info("Created session: %s", session_id)
         return session_id
@@ -65,7 +68,7 @@ class SessionManager:
             for key, value in metadata.items():
                 session.metadata.update({key: value})
         session.last_updated = datetime.now()
-        await self._store.save(session)
+        await self.save_session(session)
         return True
 
     async def add_message(self, session_id: str, message: Message) -> bool:
@@ -76,7 +79,7 @@ class SessionManager:
         try:
             session.messages.append(message)
             session.last_updated = datetime.now()
-            await self._store.save(session)
+            await self.save_session(session)
             return True
         except Exception as e:
             logging.error("Error adding message to session %s: %s", session_id, e)
@@ -109,44 +112,22 @@ class SessionManager:
             channel_type=channel_type,
             user_id=user_id,
         )
-        self.sessions.update({s.session_id: s for s in all_sessions})
         return all_sessions
 
     async def get_session(self, session_id: str) -> Optional[Session]:
         """获取会话。未命中缓存时从 store 按需加载并写入缓存。"""
-        if session_id in self.sessions:
-            return self.sessions[session_id]
-
         session = await self._store.get(session_id)
         if session:
-            self.sessions[session_id] = session
             return session
-
         logging.warning("Session not found: %s", session_id)
         return None
 
     async def delete_session(self, session_id: str) -> bool:
         """删除会话。先删 store，再清理缓存。"""
         ok = await self._store.delete(session_id)
-        if ok:
-            if session_id in self.sessions:
-                del self.sessions[session_id]
-            logging.info("Deleted session: %s", session_id)
-        else:
+        if not ok:
             logging.warning("Cannot delete: session not found: %s", session_id)
         return ok
-
-    async def save_session(self, session_id: str, session: Optional[Session] = None) -> None:
-        """持久化会话(如更新元数据后调用)。
-
-        传入 session 时优先保存该实例，并覆盖缓存，避免并发场景下被旧缓存对象覆盖。
-        """
-        if session is None:
-            session = await self.get_session(session_id)
-        else:
-            self.sessions[session_id] = session
-        if session:
-            await self._store.save(session)
 
     async def clear_history(self, session_id: str) -> bool:
         """清空会话历史"""
@@ -156,7 +137,7 @@ class SessionManager:
             return False
         try:
             session.clear()
-            await self._store.save(session)
+            await self.save_session(session)
             logging.info("Cleared history for session: %s", session_id)
             return True
         except Exception as e:
@@ -166,7 +147,7 @@ class SessionManager:
     async def compact_session(
         self,
         session_id: str,
-        keep_last_n: int = 0,
+        keep_last_n: int = 6,
     ) -> bool:
         """对会话执行压缩：生成摘要并记录到 Session.compactions，不删除历史消息。
 
@@ -177,22 +158,32 @@ class SessionManager:
         Returns:
             是否成功
         """
+        if not settings.compaction_auto:
+            return True
+
         session = await self.get_session(session_id)
         if not session:
             logging.warning("Cannot compact: session not found: %s", session_id)
             return False
-
         msgs = session.messages or []
         if not msgs:
             return True
         compact_until = max(0, len(msgs) - max(0, keep_last_n))
-        to_summarize = msgs[:compact_until]
+        start = session.last_compacted if (session.compaction is not None and session.last_compacted > 0) else 0
+        if compact_until <= start:
+            return True
+        to_summarize = msgs[start:compact_until]
         if not to_summarize:
             return True
 
         llm = llm_factory.create_model(provider=session.llm_provider, model=session.llm_model)
         try:
-            summary_message = await SessionCompaction.compact(llm=llm, messages=to_summarize)
+            previous_summary = session.compaction.content if session.compaction is not None else ""
+            summary_message = await SessionCompaction.compact(
+                llm=llm,
+                messages=to_summarize,
+                previous_summary=previous_summary,
+            )
             if summary_message is None or not (summary_message.content or "").strip():
                 logging.warning("Compaction produced empty or failed summary for session %s", session.session_id)
                 return False
@@ -202,23 +193,26 @@ class SessionManager:
             logging.error("Compaction failed for session %s: %s", session.session_id, e)
             return False
         session.last_updated = datetime.now()
-        await self._store.save(session)
+        await self.save_session(session)
         logging.info("Compacted session %s (keep_last_n=%d)", session_id, keep_last_n)
         return True
 
     async def prune_session(self, session_id: str) -> int:
         """对会话执行 prune：标记旧 tool result 输出为已清空（不删历史）。"""
+        if not settings.compaction_prune:
+            return 0
+
         session = await self.get_session(session_id)
         if not session:
             logging.warning("Cannot prune: session not found: %s", session_id)
             return 0
-
+        # 如果已有 compaction，仅从 last_compacted 之后扫描，避免重复处理更早历史段。
         start = session.last_compacted if (session.compaction is not None and session.last_compacted > 0) else 0
         pruned_tokens = SessionCompaction.prune(session.messages, start=start)
         if pruned_tokens <= 0:
             return 0
         session.last_updated = datetime.now()
-        await self._store.save(session)
+        await self.save_session(session)
         logging.info("Pruned session %s (tokens=%d)", session_id, pruned_tokens)
         return pruned_tokens
 
