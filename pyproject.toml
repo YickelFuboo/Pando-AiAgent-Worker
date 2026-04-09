@@ -229,3 +229,4 @@ priority = "supplemental"
 
 [tool.poetry.scripts]
 start = "app.main:main"
+channel-cli = "app.channel.cli.main:main"

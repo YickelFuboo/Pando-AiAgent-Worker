@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from app.agents.bus.types import InboundMessage, OutboundMessage, AgentEntry
 
 
 # Agent 池相关配置
-AGENT_POOL_IDLE_TTL_SEC = 300
-AGENT_POOL_CLEANUP_INTERVAL_SEC = 60
+AGENT_POOL_IDLE_TTL_SEC = 120
+AGENT_POOL_CLEANUP_INTERVAL_SEC = 30
 
 # 消息池相关配置
 SESSION_MAILBOX_MAXSIZE = 50
@@ -14,6 +14,18 @@ SESSION_IDLE_TTL_SEC = 1800
 GLOBAL_RUN_CONCURRENCY = 32
 ChannelOutboundCallback = Callable[[OutboundMessage], None]
 CHANNEL_OUTBOUND_CALLBACKS: Dict[str, ChannelOutboundCallback] = {}
+
+AgentPoolKey = Tuple[str, str, str, str, str]
+
+
+def _make_agent_pool_key(
+    agent_type: str,
+    user_id: str,
+    session_id: str,
+    channel_type: str,
+    channel_id: str,
+) -> AgentPoolKey:
+    return (agent_type, user_id, session_id, channel_type, channel_id)
 
 
 class MessageBus:
@@ -33,7 +45,7 @@ class MessageBus:
 
         # Agent 池：
         self.running_agent_pool: Dict[str, Any] = {}  # key是session_id，value是agent
-        self.free_agent_pool: Dict[str, List[AgentEntry]] = {}
+        self.free_agent_pool: Dict[AgentPoolKey, List[AgentEntry]] = {}
         self._agent_pool_lock = asyncio.Lock()
 
     async def push_inbound(self, msg: InboundMessage) -> None:
@@ -285,17 +297,20 @@ class MessageBus:
         self, agent_type: str, session_id: str, channel_type: str, channel_id: str,
         user_id: str, llm_provider: str, llm_model: str
     ) -> Optional[Any]:
-        """从 free_agent_pool 取一个同类型空闲 Agent 并更新为当前会话参数，若无则返回 None。"""
+        """池键含 session_id：同会话多轮可复用；跨会话不复用实例，与工具绑定的 session 一致。"""
+        pool_key = _make_agent_pool_key(
+            agent_type,
+            user_id,
+            channel_id,
+            channel_type,
+            session_id,
+        )
         async with self._agent_pool_lock:
-            entries = self.free_agent_pool.get(agent_type, [])
+            entries = self.free_agent_pool.get(pool_key, [])
             if not entries:
                 return None
             entry = entries.pop(0)
             agent = entry.agent
-            agent.session_id = session_id
-            agent.channel_type = channel_type
-            agent.channel_id = channel_id
-            agent.user_id = user_id
             agent.llm_provider = llm_provider or (agent.llm_provider or "")
             agent.llm_model = llm_model or (agent.llm_model or "")
             agent.reset()
@@ -307,11 +322,17 @@ class MessageBus:
             agent=agent,
             last_used_at=asyncio.get_running_loop().time(),
         )
-        agent_type = agent.agent_type
+        pool_key = _make_agent_pool_key(
+            agent.agent_type,
+            agent.user_id,
+            agent.session_id,
+            agent.channel_type,
+            agent.channel_id,
+        )
         async with self._agent_pool_lock:
-            if agent_type not in self.free_agent_pool:
-                self.free_agent_pool[agent_type] = []
-            self.free_agent_pool[agent_type].append(entry)
+            if pool_key not in self.free_agent_pool:
+                self.free_agent_pool[pool_key] = []
+            self.free_agent_pool[pool_key].append(entry)
 
     async def _run_agent_pool_cleanup_loop(self) -> None:
         """定期清理 free_agent_pool 中超过 AGENT_POOL_IDLE_TTL_SEC 未复用的 Agent。"""
@@ -319,11 +340,11 @@ class MessageBus:
             await asyncio.sleep(AGENT_POOL_CLEANUP_INTERVAL_SEC)
             now = asyncio.get_running_loop().time()
             async with self._agent_pool_lock:
-                for agent_type in list(self.free_agent_pool.keys()):
-                    entries = self.free_agent_pool[agent_type]
+                for pool_key in list(self.free_agent_pool.keys()):
+                    entries = self.free_agent_pool[pool_key]
                     kept = [e for e in entries if (now - e.last_used_at) <= AGENT_POOL_IDLE_TTL_SEC]
-                    self.free_agent_pool[agent_type] = kept
+                    self.free_agent_pool[pool_key] = kept
                     if not kept:
-                        self.free_agent_pool.pop(agent_type, None)
+                        self.free_agent_pool.pop(pool_key, None)
 
 MESSAGE_BUS = MessageBus()
