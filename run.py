@@ -1,13 +1,8 @@
+﻿"""
+python run.py
 """
-项目根目录启动脚本。运行: python run.py
-"""
-import uvicorn
-from app.config.settings import settings
+from app.main import main
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "app.main:app",
-        host=settings.service_host,
-        port=settings.service_port,
-        reload=settings.debug,
-    )
+
+if __name__=="__main__":
+    main()

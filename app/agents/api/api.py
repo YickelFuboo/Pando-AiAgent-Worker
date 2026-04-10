@@ -10,6 +10,7 @@ from app.agents.contants import AGENTS_ROOT_PATH, AGENT_META_FILENAME
 
 router = APIRouter(prefix="/agents")
 
+
 class AgentTypeItem(BaseModel):
     """单个 Agent 类型：类型标识、中文名称、中文描述。"""
     agent_type: str = Field(..., description="Agent 类型标识，即目录名")

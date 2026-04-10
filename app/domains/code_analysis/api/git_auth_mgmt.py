@@ -8,6 +8,7 @@ from app.domains.code_analysis.services.repo_mgmt.git_auth_service import GitAut
 
 router = APIRouter(prefix="/git-auth")
 
+
 @router.post("/{provider}", response_model=GitAuthResponse)
 async def save_git_auth(
     provider: str,
