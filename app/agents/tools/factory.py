@@ -4,21 +4,32 @@ from typing import Any,Dict,List,Optional
 from .base import BaseTool
 from .schemes import ToolResult,ToolSuccessResult,ToolErrorResult,ToolResultStatus
 from .truncation import Truncate
-from app.agents.tools.local.ask_question import AskQuestion
-from app.agents.tools.local.batch_tool import BatchTool
-from app.agents.tools.local.code.apply_patch import ApplyPatchTool
-from app.agents.tools.local.code.code_search import CodeDependenciesSearchTool,CodeRelatedFilesSearchTool,CodeSimilarSearchTool
-from app.agents.tools.local.code.code_shell import CodeShellTool
-from app.agents.tools.local.code.list_code_files import ListCodeFilesTool
-from app.agents.tools.local.code.lsp_tool import LspTool
-from app.agents.tools.local.cron import CronTool
-from app.agents.tools.local.dir_read import ReadDirTool
-from app.agents.tools.local.file_read import ReadFileTool
-from app.agents.tools.local.file_search import GlobTool,GrepTool
-from app.agents.tools.local.file_write import InsertFileTool,MultiReplaceTextTool,ReplaceFileTextTool,WriteFileTool
-from app.agents.tools.local.shell import ExecTool
-from app.agents.tools.local.todo import TodoReadTool,TodoWriteTool
-from app.agents.tools.local.web import WebFetchTool,WebSearchTool
+from app.agents.tools.local import (
+    AskQuestion,
+    BatchTool,
+    ApplyPatchTool,
+    CodeDependenciesSearchTool,
+    CodeRelatedFilesSearchTool,
+    CodeSimilarSearchTool,
+    CodeShellTool,
+    ListCodeFilesTool,
+    LspTool,
+    CronTool,
+    ReadDirTool,
+    ReadFileTool,
+    GlobTool,
+    GrepTool,
+    InsertFileTool,
+    MultiReplaceTextTool,
+    ReplaceFileTextTool,
+    WriteFileTool,
+    ExecTool,
+    TodoReadTool,
+    TodoWriteTool,
+    WebFetchTool,
+    WebSearchTool,
+    SpawnTool,
+)
 
 
 def register_tools_by_config(
@@ -44,23 +55,23 @@ def register_tools_by_config(
     # 注册工具
     if "ask_question" in usable:
         tools_to_register.append(AskQuestion())
-    if "read_file" in usable:
+    if "file_read" in usable:
         tools_to_register.append(ReadFileTool(**tool_init_kwargs))
-    if "write_file" in usable:
+    if "file_write" in usable:
         tools_to_register.append(WriteFileTool(**tool_init_kwargs))
-    if "replace_file_text" in usable:
-        tools_to_register.append(ReplaceFileTextTool(**tool_init_kwargs))
-    if "insert_file" in usable:
+    if "file_insert" in usable:
         tools_to_register.append(InsertFileTool(**tool_init_kwargs))
-    if "multi_replace_text" in usable:
+    if "file_replace_text" in usable:
+        tools_to_register.append(ReplaceFileTextTool(**tool_init_kwargs))
+    if "file_replace_multi_text" in usable:
         tools_to_register.append(MultiReplaceTextTool(**tool_init_kwargs))
     if "glob_search" in usable:
         tools_to_register.append(GlobTool())
     if "grep_search" in usable:
         tools_to_register.append(GrepTool())
-    if "read_dir" in usable:
+    if "dir_read" in usable:
         tools_to_register.append(ReadDirTool())
-    if "exec" in usable:
+    if "shell_exec" in usable:
         tools_to_register.append(ExecTool())
 
     if "list_code_files" in usable:
@@ -91,13 +102,12 @@ def register_tools_by_config(
     if "cron" in usable:
         tools_to_register.append(CronTool(session_id=session_id,user_id=user_id,agent_type=agent_type,channel_id=channel_id,channel_type=channel_type))
     if "spawn" in usable and subagent_manager is not None:
-        from app.agents.tools.local.spawn import SpawnTool
         tools_to_register.append(SpawnTool(subagent_manager))
     if tools_to_register:
         tools_factory.register_tools(*tools_to_register)
 
 
-TOOLS_CACHE_NAME = ("exec",)
+TOOLS_CACHE_NAME = ("shell_exec",)
 MAX_CACHE_SIZE = 256
 DELEGATION_TOOL_NAME = "spawn"
 

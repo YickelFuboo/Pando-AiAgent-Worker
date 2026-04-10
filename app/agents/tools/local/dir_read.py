@@ -13,7 +13,7 @@ class ReadDirTool(BaseTool):
 
     @property
     def name(self) -> str:
-        return "read_dir"
+        return "dir_read"
 
     @property
     def description(self) -> str:
