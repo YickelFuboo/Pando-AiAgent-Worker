@@ -1,3 +1,15 @@
 {
-  "skills": {}
+  "enable_extend": "no",
+  "skills": {
+    "memory": "allow",
+    "github": "allow",
+    "summarize": "allow",
+    "repo_analysis": "allow",
+    "repo-scan": "allow",
+    "structure-analyze": "allow",
+    "generate-doc": "allow",
+    "refresh-doc": "allow",
+    "generate-readme": "allow",
+    "repo_qa": "allow"
+  }
 }

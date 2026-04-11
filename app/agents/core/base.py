@@ -107,7 +107,7 @@ class BaseAgent(ABC):
         self.temperature = temperature or 0.7
         self.memory_window = memory_window or 100
 
-        self.params = kwargs
+        self.params = dict(kwargs)
 
         # 执行步数相关
         self._state = AgentState.IDLE

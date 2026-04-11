@@ -1,12 +1,14 @@
 from typing import Any, TYPE_CHECKING
 from app.agents.tools.base import BaseTool
-from app.agents.core.subagent import SubAgentManager
+from app.agents.tools.schemes import ToolResult, ToolSuccessResult
+if TYPE_CHECKING:
+    from app.agents.core.subagent import SubAgentManager
 
 
 class SpawnTool(BaseTool):
     """Tool to spawn a subagent for background task execution."""
     
-    def __init__(self, subagent_manager: SubAgentManager):
+    def __init__(self, subagent_manager: "SubAgentManager"):
         self.subagent_manager = subagent_manager
     
     @property
@@ -44,9 +46,10 @@ class SpawnTool(BaseTool):
             "required": ["task"],
         }
     
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> ToolResult:
         """Spawn a subagent to execute the given task."""
-        return await self.subagent_manager.start_task(
+        text = await self.subagent_manager.start_task(
             task=task,
             label=label,
         )
+        return ToolSuccessResult(text)

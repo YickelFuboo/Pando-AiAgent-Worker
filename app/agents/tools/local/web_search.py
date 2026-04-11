@@ -1,6 +1,7 @@
 from typing import Any
 from ..base import BaseTool
 from ..schemes import ToolResult, ToolSuccessResult, ToolErrorResult
+from app.infrastructure.web_search.tavily import TavilySearch
 
 
 class WebSearchTool(BaseTool):

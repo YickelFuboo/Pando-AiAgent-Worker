@@ -43,3 +43,6 @@ Thumbs.db
 # Project specific
 config.toml
 !config.template.toml
+
+# ai 信息
+.Pando

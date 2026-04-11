@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 from app.domains.code_analysis.services.lsp.lsp_service import CodeLSPService
-from app.config import PROJECT_BASE_DIR
+from app.config.settings import PROJECT_BASE_DIR
 
 
 # 文件写操作相关

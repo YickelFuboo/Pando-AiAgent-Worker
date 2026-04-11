@@ -264,6 +264,7 @@ class MessageBus:
             user_id=inbound_msg.user_id,
             llm_provider=inbound_msg.llm_provider or "",
             llm_model=inbound_msg.llm_model or "",
+            metadata=metadata,
         )
         if agent is None:
             agent = ReActAgent(
@@ -274,6 +275,7 @@ class MessageBus:
                 user_id=inbound_msg.user_id,
                 llm_provider=inbound_msg.llm_provider,
                 llm_model=inbound_msg.llm_model,
+                **metadata,
             )
 
         try:
@@ -295,15 +297,15 @@ class MessageBus:
     
     async def _acquire_agent_from_pool(
         self, agent_type: str, session_id: str, channel_type: str, channel_id: str,
-        user_id: str, llm_provider: str, llm_model: str
+        user_id: str, llm_provider: str, llm_model: str, metadata: dict[str, Any]
     ) -> Optional[Any]:
         """池键含 session_id：同会话多轮可复用；跨会话不复用实例，与工具绑定的 session 一致。"""
         pool_key = _make_agent_pool_key(
             agent_type,
             user_id,
-            channel_id,
-            channel_type,
             session_id,
+            channel_type,
+            channel_id,
         )
         async with self._agent_pool_lock:
             entries = self.free_agent_pool.get(pool_key, [])
@@ -313,6 +315,8 @@ class MessageBus:
             agent = entry.agent
             agent.llm_provider = llm_provider or (agent.llm_provider or "")
             agent.llm_model = llm_model or (agent.llm_model or "")
+            if metadata:
+                agent.params.update(metadata)
             agent.reset()
             return agent
 

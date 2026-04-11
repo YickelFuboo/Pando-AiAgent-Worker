@@ -1,9 +1,9 @@
 {
   "usable_tools":[
-    "read_file",
-    "write_file",
-    "read_dir",
-    "exec",
+    "file_read",
+    "file_write",
+    "dir_read",
+    "shell_exec",
     "web_search",
     "web_fetch",
     "cron"

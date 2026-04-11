@@ -1,9 +1,39 @@
 import fnmatch
 import re
 from pathlib import Path
-from typing import Any,Dict,List,Optional,Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from app.agents.tools.base import BaseTool
-from app.agents.tools.schemes import ToolErrorResult,ToolResult,ToolSuccessResult
+from app.agents.tools.schemes import ToolErrorResult, ToolResult, ToolSuccessResult
+
+_BRACE_SEGMENT = re.compile(r"\{([^{}]+)\}")
+
+
+def _expand_brace_patterns(pattern: str) -> List[str]:
+    """Expand bash-style {a,b,c} segments; fnmatch does not treat braces as alternation."""
+    m = _BRACE_SEGMENT.search(pattern)
+    if not m:
+        return [pattern]
+    inner = m.group(1)
+    alts = [x.strip() for x in inner.split(",") if x.strip()]
+    if not alts:
+        return [pattern]
+    prefix, suffix = pattern[: m.start()], pattern[m.end() :]
+    out: List[str] = []
+    for alt in alts:
+        out.extend(_expand_brace_patterns(prefix + alt + suffix))
+    return out
+
+
+def _effective_patterns(pattern: str) -> List[str]:
+    """Brace-expand, then add tail patterns for leading `**/` so `**/*.py` also matches root `foo.py` (fnmatch quirk)."""
+    raw = _expand_brace_patterns(pattern)
+    seen = list(dict.fromkeys(raw))
+    for pat in list(seen):
+        if pat.startswith("**/") and len(pat) > 3:
+            tail = pat[3:]
+            if tail and tail not in seen:
+                seen.append(tail)
+    return seen
 
 
 class GlobTool(BaseTool):
@@ -15,13 +45,16 @@ class GlobTool(BaseTool):
     def description(self) -> str:
         return """Fast file pattern matching tool for local projects of any type.
 
-Usage:
-- Supports glob patterns like "**/*.js", "src/**/*.ts", "*.md", or "data/**/*.csv".
-- Returns file paths sorted by modification time (newest first).
-- Results are limited to 100 paths.
-- Use this tool when you need to find files by name patterns.
-- If you expect many iterative search rounds, prefer the task tool for broader exploration.
-- When you already know multiple likely patterns, run multiple glob calls in parallel.
+Matching (Python fnmatch, not full POSIX glob):
+- Wildcards: * (substring), ? (one char), [abc] (one of; [!a-z] negated). Each file is checked against (1) path relative to `path`, and (2) filename only—so `*.py` matches any `.py` under the search root.
+- Patterns starting with `**/` (e.g. `**/*.ts`): the tool also applies the part after `**/`, so root-level files like `foo.ts` match. Prefix-only patterns like `app/**/*.py` do not match `app/x.py` one level under `app`; use `app/*.py` for that case or set `path` to `.../app` and use `*.py`.
+- Brace `{a,b,c}` is expanded (e.g. `*.{py,toml}` -> `*.py`, `*.toml`).
+
+Limits:
+- Newest first by mtime; at most 100 paths returned.
+
+When to use:
+- Find files by name/extension; narrow `path` when the tree is large. For long multi-round exploration, prefer delegation (e.g. spawn) instead.
 """
 
     @property
@@ -31,11 +64,19 @@ Usage:
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "The glob pattern to match files against"
+                    "description": (
+                        "fnmatch-style pattern. Wildcards: *, ?, [seq]. "
+                        "Tested against the file path relative to `path` and against the filename alone (so *.ext hits any depth). "
+                        "Brace alternation: *.{py,toml} -> *.py and *.toml. "
+                        "Leading **/: e.g. **/*.js also applies the suffix pattern (*.js) so files directly under the search root match. "
+                        "For a fixed subfolder prefix (e.g. app/), combine app/*.py and app/**/*.py or set path to that folder and use *.py."
+                    ),
                 },
                 "path": {
                     "type": "string",
-                    "description": "Optional absolute directory path to search in."
+                    "description": (
+                        "Absolute directory to search; must exist. If omitted, uses the process current working directory (not necessarily the repo root)."
+                    ),
                 },
             },
             "required": ["pattern"],
@@ -59,6 +100,7 @@ Usage:
             return ToolErrorResult(f"glob failed: {e}")
 
         limit = 100
+        patterns = _effective_patterns(pattern)
         items: List[Tuple[str, float]] = []
         try:
             for p in search.rglob("*"):
@@ -66,7 +108,10 @@ Usage:
                     continue
 
                 rel = str(p.relative_to(search)).replace("\\", "/")
-                if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(p.name, pattern):
+                if any(
+                    fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(p.name, pat)
+                    for pat in patterns
+                ):
                     try:
                         mtime = p.stat().st_mtime
                     except OSError:
@@ -83,5 +128,5 @@ Usage:
 
         out = "\n".join([p for p, _ in final])
         if truncated:
-            out += "\n\n(Results are truncated: showing first 100 results. Consider using a more specific path or pattern.)"
+            out += "\n\n(Results are truncated: showing 100 newest by mtime. Narrow `path` or use a more specific pattern.)"
         return ToolSuccessResult(out)

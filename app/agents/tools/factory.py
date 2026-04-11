@@ -28,7 +28,6 @@ from app.agents.tools.local import (
     TodoWriteTool,
     WebFetchTool,
     WebSearchTool,
-    SpawnTool,
 )
 
 
@@ -102,12 +101,13 @@ def register_tools_by_config(
     if "cron" in usable:
         tools_to_register.append(CronTool(session_id=session_id,user_id=user_id,agent_type=agent_type,channel_id=channel_id,channel_type=channel_type))
     if "spawn" in usable and subagent_manager is not None:
-        tools_to_register.append(SpawnTool(subagent_manager))
+        from app.agents.tools.local import SpawnTool
+        tools_to_register.append(SpawnTool(subagent_manager=subagent_manager))
     if tools_to_register:
         tools_factory.register_tools(*tools_to_register)
 
 
-TOOLS_CACHE_NAME = ("shell_exec",)
+TOOLS_CACHE_NAME = ()
 MAX_CACHE_SIZE = 256
 DELEGATION_TOOL_NAME = "spawn"
 
